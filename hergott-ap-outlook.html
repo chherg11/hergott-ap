@@ -1070,13 +1070,12 @@ function App(){
     // _msalReady reset inside signOut — allows fresh init if user signs back in
   }
 
-    const AP_MAILBOX='AccountsPayable@hergottcaseih.com';
-  async function handleScan(){
+    async function handleScan(){
     if(!token){showToast('Sign in first','error');return;}
     setScanning(true);setEmails([]);
     try{
       const tok=await getToken(config,account);setToken(tok);
-      const msgs=await getSharedMailboxEmails(tok,AP_MAILBOX);
+      const msgs=await getUnreadEmails(tok,folderId);
       const enriched=msgs.map(m=>{
         const pdfs=(m.attachments||[]).filter(a=>
           a.contentType==='application/pdf'||a.name?.toLowerCase().endsWith('.pdf')
