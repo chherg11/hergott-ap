@@ -1050,12 +1050,8 @@ function App(){
     setScanning(true);setEmails([]);
     try{
       const tok=await getToken(config,account);setToken(tok);
-      const[myMsgs,apMsgs]=await Promise.all([
-        getUnreadEmails(tok,folderId),
-        getSharedMailboxEmails(tok,AP_MAILBOX),
-      ]);
-      const allMsgs=[...myMsgs,...apMsgs];
-      const enriched=await Promise.all(allMsgs.map(async m=>{
+      const msgs=await getSharedMailboxEmails(tok,AP_MAILBOX);
+      const enriched=await Promise.all(msgs.map(async m=>{
         try{const a=await getAttachments(tok,m.id,m._mailbox);return{...m,pdfs:a};}
         catch{return{...m,pdfs:[]};}
       }));
@@ -1182,15 +1178,7 @@ function App(){
                 <div className="no-emails">Sign in to scan your Outlook inbox</div>
               ):(
                 <>
-                  <div className="folder-row">
-                    <select className="folder-select" value={folderId} onChange={e=>setFolderId(e.target.value)}>
-                      <option value="inbox">Inbox</option>
-                      {folders.map(f=><option key={f.id} value={f.id}>{f.displayName}</option>)}
-                    </select>
-                    <button className="btn-scan" onClick={handleScan} disabled={scanning}>
-                      {scanning?<><span className="spin"/>Scanning</>:'Scan Now'}
-                    </button>
-                  </div>
+                  <div className="folder-row"><span style={{flex:1,fontSize:'11px',color:'#888',alignSelf:'center',fontStyle:'italic'}}>accounts payable inbox</span><button className="btn-scan" onClick={handleScan} disabled={scanning}>{scanning?<><span className="spin"/>Scanning</>:'Scan Now'}</button></div>
                   {emails.length===0&&!scanning&&(
                     <div className="no-emails">No unread emails with PDF attachments</div>
                   )}
@@ -1202,7 +1190,7 @@ function App(){
                             <div className="email-subject">{msg.subject||'(no subject)'}</div>
                             <div className="email-meta">{msg.from?.emailAddress?.name||msg.from?.emailAddress?.address} · {new Date(msg.receivedDateTime).toLocaleDateString('en-CA')}</div>
                           </div>
-                          {msg._mailbox&&<span className="email-badge" style={{background:'#1a6b3c',marginRight:'4px'}}>AP</span>}<span className="email-badge">{msg.pdfs.length} PDF{msg.pdfs.length!==1?'s':''}</span>
+                          <span className="email-badge">{msg.pdfs.length} PDF{msg.pdfs.length!==1?'s':''}</span>
                           <button className="btn-email-add" onClick={()=>addEmailToQueue(msg)}>Add</button>
                         </div>
                       ))}
