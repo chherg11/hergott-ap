@@ -499,12 +499,14 @@ function loadConfig(){
   return{
     clientId:localStorage.getItem('hfe_clientId')||'',
     tenantId:localStorage.getItem('hfe_tenantId')||'',
+    clientSecret:localStorage.getItem('hfe_clientSecret')||'',
     apiKey:localStorage.getItem('hfe_apiKey')||'',
   };
 }
 function saveConfig(cfg){
   localStorage.setItem('hfe_clientId',cfg.clientId);
   localStorage.setItem('hfe_tenantId',cfg.tenantId);
+  localStorage.setItem('hfe_clientSecret',cfg.clientSecret);
   localStorage.setItem('hfe_apiKey',cfg.apiKey);
 }
 
@@ -602,6 +604,19 @@ async function getSharedMailboxEmails(tok,upn){
     console.warn(`Shared mailbox fetch failed for ${upn}:`,e.message);
     return[];
   }
+}
+async function getAppToken(config){
+  const url=`https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/token`;
+  const body=new URLSearchParams({
+    grant_type:'client_credentials',
+    client_id:config.clientId,
+    client_secret:config.clientSecret,
+    scope:'https://graph.microsoft.com/.default',
+  });
+  const r=await fetch(url,{method:'POST',body});
+  if(!r.ok)throw new Error(`App token failed: ${r.status}`);
+  const d=await r.json();
+  return d.access_token;
 }
 async function getAttachments(tok,msgId,upn){
   const base=upn?`/users/${encodeURIComponent(upn)}`:`/me`;
@@ -748,7 +763,7 @@ function pct(c){return Math.round((c||0)*100)+'%';}
 // ── Setup Screen ──────────────────────────────────────────────────────────────
 function SetupScreen({onSave}){
   const[form,setForm]=useState(loadConfig());
-  const ok=form.clientId&&form.tenantId&&form.apiKey;
+  const ok=form.clientId&&form.tenantId&&form.clientSecret&&form.apiKey;
   const set=k=>e=>setForm(f=>({...f,[k]:e.target.value.trim()}));
   return(
     <div className="setup-overlay">
@@ -780,7 +795,21 @@ function SetupScreen({onSave}){
         </div>
 
         <div className="setup-step">
-          <div className="setup-step-title">Step 2 — Anthropic API Key</div>
+          <div className="setup-step-title">Step 2 — App Client Secret</div>
+          <div className="setup-steps">
+            In Entra → App registrations → Hergott AP Processor → Certificates &amp; secrets.<br/>
+            Use the <code>AP Mailbox Reader</code> secret value.
+          </div>
+          <div className="field-group">
+            <div className="field-label">Client Secret</div>
+            <input className="field-input" type="password" placeholder="client secret value..."
+              value={form.clientSecret} onChange={set('clientSecret')}/>
+            <div className="field-hint">Stored in browser localStorage. Used only to read the AP shared mailbox.</div>
+          </div>
+        </div>
+
+        <div className="setup-step">
+          <div className="setup-step-title">Step 3 — Anthropic API Key</div>
           <div className="setup-steps">
             Get your key at <code>console.anthropic.com</code> → API Keys → Create key.<br/>
             Set a <code>$20/month</code> spending limit. Cost is ~$0.10–0.20 per document.
@@ -1017,7 +1046,7 @@ function App(){
   const dropRef=useRef(null);
   const fileRef=useRef(null);
 
-  const needsSetup=!config.clientId||!config.tenantId||!config.apiKey;
+  const needsSetup=!config.clientId||!config.tenantId||!config.clientSecret||!config.apiKey;
 
   function showToast(msg,type='info',ms=3500){
     setToast({msg,type});
@@ -1050,7 +1079,8 @@ function App(){
     setScanning(true);setEmails([]);
     try{
       const tok=await getToken(config,account);setToken(tok);
-      const msgs=await getSharedMailboxEmails(tok,AP_MAILBOX);
+      const appTok=await getAppToken(config);
+      const msgs=await getSharedMailboxEmails(appTok,AP_MAILBOX);
       const enriched=await Promise.all(msgs.map(async m=>{
         try{const a=await getAttachments(tok,m.id,m._mailbox);return{...m,pdfs:a};}
         catch{return{...m,pdfs:[]};}
@@ -1161,7 +1191,7 @@ function App(){
           <button className="btn-sign-in" onClick={handleSignIn}>Sign In with Microsoft</button>
         )}
         <button className="btn-gear" title="Reset configuration"
-          onClick={()=>{if(confirm('Reset all saved configuration?')){localStorage.removeItem('hfe_clientId');localStorage.removeItem('hfe_tenantId');localStorage.removeItem('hfe_apiKey');resetMsal();window.location.reload();}}}>⚙</button>
+          onClick={()=>{if(confirm('Reset all saved configuration?')){localStorage.removeItem('hfe_clientId');localStorage.removeItem('hfe_tenantId');localStorage.removeItem('hfe_clientSecret');localStorage.removeItem('hfe_apiKey');resetMsal();window.location.reload();}}}>⚙</button>
       </div>
 
       <div className="app-body">
