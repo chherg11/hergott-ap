@@ -593,16 +593,28 @@ async function getUnreadEmails(tok,folderId='inbox'){
   const d=await gGet(url,tok);
   return d.value||[];
 }
-async function getAttachments(tok,msgId){
-  const d=await gGet(`/me/messages/${msgId}/attachments?$select=id,name,contentType,size`,tok);
+async function getSharedMailboxEmails(tok,upn){
+  const url=`/users/${encodeURIComponent(upn)}/mailFolders/inbox/messages?$filter=isRead eq false and hasAttachments eq true&$select=id,subject,from,receivedDateTime&$top=50&$orderby=receivedDateTime desc`;
+  try{
+    const d=await gGet(url,tok);
+    return(d.value||[]).map(m=>({...m,_mailbox:upn}));
+  }catch(e){
+    console.warn(`Shared mailbox fetch failed for ${upn}:`,e.message);
+    return[];
+  }
+}
+async function getAttachments(tok,msgId,upn){
+  const base=upn?`/users/${encodeURIComponent(upn)}`:`/me`;
+  const d=await gGet(`${base}/messages/${msgId}/attachments?$select=id,name,contentType,size`,tok);
   return(d.value||[]).filter(a=>a.contentType==='application/pdf'||a.name?.toLowerCase().endsWith('.pdf'));
 }
-async function getAttachmentB64(tok,msgId,attId){
+async function getAttachmentB64(tok,msgId,attId,upn){
+  const base=upn?`/users/${encodeURIComponent(upn)}`:`/me`;
   try{
-    const d=await gGet(`/me/messages/${msgId}/attachments/${attId}?$select=contentBytes`,tok);
+    const d=await gGet(`${base}/messages/${msgId}/attachments/${attId}?$select=contentBytes`,tok);
     if(d.contentBytes)return d.contentBytes;
   }catch{}
-  return gBinary(`/me/messages/${msgId}/attachments/${attId}/$value`,tok);
+  return gBinary(`${base}/messages/${msgId}/attachments/${attId}/$value`,tok);
 }
 
 // ── Anthropic extraction ─────────────────────────────────────────────────────
@@ -1032,14 +1044,19 @@ function App(){
     // _msalReady reset inside signOut — allows fresh init if user signs back in
   }
 
+    const AP_MAILBOX='AccountsPayable@hergottcaseih.com';
   async function handleScan(){
     if(!token){showToast('Sign in first','error');return;}
     setScanning(true);setEmails([]);
     try{
       const tok=await getToken(config,account);setToken(tok);
-      const msgs=await getUnreadEmails(tok,folderId);
-      const enriched=await Promise.all(msgs.map(async m=>{
-        try{const a=await getAttachments(tok,m.id);return{...m,pdfs:a};}
+      const[myMsgs,apMsgs]=await Promise.all([
+        getUnreadEmails(tok,folderId),
+        getSharedMailboxEmails(tok,AP_MAILBOX),
+      ]);
+      const allMsgs=[...myMsgs,...apMsgs];
+      const enriched=await Promise.all(allMsgs.map(async m=>{
+        try{const a=await getAttachments(tok,m.id,m._mailbox);return{...m,pdfs:a};}
         catch{return{...m,pdfs:[]};}
       }));
       const withPdfs=enriched.filter(m=>m.pdfs.length>0);
@@ -1056,7 +1073,7 @@ function App(){
       if(queue.find(q=>q.id===id))continue;
       try{
         const tok=await getToken(config,account);setToken(tok);
-        const b64=await getAttachmentB64(tok,msg.id,att.id);
+        const b64=await getAttachmentB64(tok,msg.id,att.id,msg._mailbox);
         setQueue(q=>[...q,{id,name:att.name,b64,source:msg.subject||msg.from?.emailAddress?.address||'Outlook',status:'pending'}]);
       }catch(e){showToast(`Could not load ${att.name}: ${e.message}`,'error',5000);}
     }
@@ -1185,7 +1202,7 @@ function App(){
                             <div className="email-subject">{msg.subject||'(no subject)'}</div>
                             <div className="email-meta">{msg.from?.emailAddress?.name||msg.from?.emailAddress?.address} · {new Date(msg.receivedDateTime).toLocaleDateString('en-CA')}</div>
                           </div>
-                          <span className="email-badge">{msg.pdfs.length} PDF{msg.pdfs.length!==1?'s':''}</span>
+                          {msg._mailbox&&<span className="email-badge" style={{background:'#1a6b3c',marginRight:'4px'}}>AP</span>}<span className="email-badge">{msg.pdfs.length} PDF{msg.pdfs.length!==1?'s':''}</span>
                           <button className="btn-email-add" onClick={()=>addEmailToQueue(msg)}>Add</button>
                         </div>
                       ))}
