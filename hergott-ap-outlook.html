@@ -533,7 +533,7 @@ function getMsalReady(cfg){
 
 function resetMsal(){ _msalReady=null; }
 
-const SCOPES=['User.Read','Mail.Read'];
+const SCOPES=['User.Read','Mail.ReadWrite'];
 
 async function signIn(cfg){
   const inst=await getMsalReady(cfg);
@@ -596,7 +596,7 @@ async function getUnreadEmails(tok,folderId='inbox'){
   return d.value||[];
 }
 async function getSharedMailboxEmails(tok,upn){
-  const url=`/users/${encodeURIComponent(upn)}/mailFolders/inbox/messages?$select=id,subject,from,receivedDateTime,hasAttachments&$expand=attachments($select=id,name,contentType,size)&$top=50&$orderby=receivedDateTime desc`;
+  const url=`/users/${encodeURIComponent(upn)}/mailFolders/inbox/messages?$filter=isRead eq false&$select=id,subject,from,receivedDateTime,hasAttachments&$top=50`;
   try{
     const d=await gGet(url,tok);
     return(d.value||[]).map(m=>({...m,_mailbox:upn}));
@@ -619,6 +619,16 @@ async function getAttachmentB64(tok,msgId,attId,upn){
   return gBinary(`${base}/messages/${msgId}/attachments/${attId}/$value`,tok);
 }
 
+async function markAsRead(tok,msgId,upn){
+  const base=upn?`/users/${encodeURIComponent(upn)}`:`/me`;
+  try{
+    await fetch(`https://graph.microsoft.com/v1.0${base}/messages/${msgId}`,{
+      method:'PATCH',
+      headers:{Authorization:`Bearer ${tok}`,Accept:'application/json','Content-Type':'application/json'},
+      body:JSON.stringify({isRead:true}),
+    });
+  }catch{}
+}
 // ── Anthropic extraction ─────────────────────────────────────────────────────
 async function extractDoc(b64,name,apiKey){
   const prompt=`You are a precise AP processor for Hergott Farm Equipment Ltd., a Case IH agricultural equipment dealership in Humboldt, Saskatchewan, Canada. Extract all invoice data for entry into the IntelliDealer ERP system.
@@ -1068,6 +1078,7 @@ function App(){
       const tok=await getToken(config,account);setToken(tok);
       const msgs=await getSharedMailboxEmails(tok,AP_MAILBOX);
       const enriched=await Promise.all(msgs.map(async m=>{
+        if(!m.hasAttachments)return{...m,pdfs:[]};
         try{const a=await getAttachments(tok,m.id,m._mailbox);return{...m,pdfs:a};}
         catch{return{...m,pdfs:[]};}
       }));
@@ -1086,6 +1097,7 @@ function App(){
       try{
         const tok=await getToken(config,account);setToken(tok);
         const b64=await getAttachmentB64(tok,msg.id,att.id,msg._mailbox);
+        await markAsRead(tok,msg.id,msg._mailbox);
         setQueue(q=>[...q,{id,name:att.name,b64,source:msg.subject||msg.from?.emailAddress?.address||'Outlook',status:'pending'}]);
       }catch(e){showToast(`Could not load ${att.name}: ${e.message}`,'error',5000);}
     }
