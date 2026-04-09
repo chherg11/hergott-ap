@@ -605,19 +605,6 @@ async function getSharedMailboxEmails(tok,upn){
     return[];
   }
 }
-async function getAppToken(config){
-  const url=`https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/token`;
-  const body=new URLSearchParams({
-    grant_type:'client_credentials',
-    client_id:config.clientId,
-    client_secret:config.clientSecret,
-    scope:'https://graph.microsoft.com/.default',
-  });
-  const r=await fetch(url,{method:'POST',body});
-  if(!r.ok)throw new Error(`App token failed: ${r.status}`);
-  const d=await r.json();
-  return d.access_token;
-}
 async function getAttachments(tok,msgId,upn){
   const base=upn?`/users/${encodeURIComponent(upn)}`:`/me`;
   const d=await gGet(`${base}/messages/${msgId}/attachments?$select=id,name,contentType,size`,tok);
@@ -763,7 +750,7 @@ function pct(c){return Math.round((c||0)*100)+'%';}
 // ── Setup Screen ──────────────────────────────────────────────────────────────
 function SetupScreen({onSave}){
   const[form,setForm]=useState(loadConfig());
-  const ok=form.clientId&&form.tenantId&&form.clientSecret&&form.apiKey;
+  const ok=form.clientId&&form.tenantId&&form.apiKey;
   const set=k=>e=>setForm(f=>({...f,[k]:e.target.value.trim()}));
   return(
     <div className="setup-overlay">
@@ -1046,7 +1033,7 @@ function App(){
   const dropRef=useRef(null);
   const fileRef=useRef(null);
 
-  const needsSetup=!config.clientId||!config.tenantId||!config.clientSecret||!config.apiKey;
+  const needsSetup=!config.clientId||!config.tenantId||!config.apiKey;
 
   function showToast(msg,type='info',ms=3500){
     setToast({msg,type});
@@ -1079,8 +1066,7 @@ function App(){
     setScanning(true);setEmails([]);
     try{
       const tok=await getToken(config,account);setToken(tok);
-      const appTok=await getAppToken(config);
-      const msgs=await getSharedMailboxEmails(appTok,AP_MAILBOX);
+      const msgs=await getSharedMailboxEmails(tok,AP_MAILBOX);
       const enriched=await Promise.all(msgs.map(async m=>{
         try{const a=await getAttachments(tok,m.id,m._mailbox);return{...m,pdfs:a};}
         catch{return{...m,pdfs:[]};}
