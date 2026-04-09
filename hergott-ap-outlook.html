@@ -591,12 +591,12 @@ async function getMailFolders(tok){
   return d.value||[];
 }
 async function getUnreadEmails(tok,folderId='inbox'){
-  const url=`/me/mailFolders/${folderId}/messages?$filter=isRead eq false and hasAttachments eq true&$select=id,subject,from,receivedDateTime&$top=50&$orderby=receivedDateTime desc`;
+  const url=`/me/mailFolders/${folderId}/messages?$filter=isRead eq false&$select=id,subject,from,receivedDateTime&$top=50&$orderby=receivedDateTime desc`;
   const d=await gGet(url,tok);
   return d.value||[];
 }
 async function getSharedMailboxEmails(tok,upn){
-  const url=`/users/${encodeURIComponent(upn)}/mailFolders/inbox/messages?$filter=isRead eq false and hasAttachments eq true&$select=id,subject,from,receivedDateTime&$top=50&$orderby=receivedDateTime desc`;
+  const url=`/users/${encodeURIComponent(upn)}/mailFolders/inbox/messages?$filter=isRead eq false&$select=id,subject,from,receivedDateTime&$top=50&$orderby=receivedDateTime desc`;
   try{
     const d=await gGet(url,tok);
     return(d.value||[]).map(m=>({...m,_mailbox:upn}));
