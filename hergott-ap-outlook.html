@@ -519,7 +519,7 @@ function getMsalReady(cfg){
       auth:{
         clientId:cfg.clientId,
         authority:`https://login.microsoftonline.com/${cfg.tenantId}`,
-        redirectUri:window.location.href.split('?')[0].split('#')[0],
+        redirectUri:`${window.location.origin}${window.location.pathname.replace(/\/[^\/]*$/, '/redirect.html')}`,
       },
       cache:{cacheLocation:'sessionStorage',storeAuthStateInCookie:false},
     });
