@@ -533,7 +533,7 @@ function getMsalReady(cfg){
 
 function resetMsal(){ _msalReady=null; }
 
-const SCOPES=['User.Read','Mail.ReadWrite'];
+const SCOPES=['User.Read','Mail.Read'];
 
 async function signIn(cfg){
   const inst=await getMsalReady(cfg);
@@ -596,7 +596,7 @@ async function getUnreadEmails(tok,folderId='inbox'){
   return d.value||[];
 }
 async function getSharedMailboxEmails(tok,upn){
-  const url=`/users/${encodeURIComponent(upn)}/mailFolders/inbox/messages?$select=id,subject,from,receivedDateTime,hasAttachments&$expand=attachments($select=id,name,contentType,size)&$top=50`;
+  const url=`/users/${encodeURIComponent(upn)}/mailFolders/inbox/messages?$select=id,subject,from,receivedDateTime,hasAttachments&$top=50`;
   try{
     const d=await gGet(url,tok);
     return(d.value||[]).map(m=>({...m,_mailbox:upn}));
