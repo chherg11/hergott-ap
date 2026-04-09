@@ -596,7 +596,7 @@ async function getUnreadEmails(tok,folderId='inbox'){
   return d.value||[];
 }
 async function getSharedMailboxEmails(tok,upn){
-  const url=`/users/${encodeURIComponent(upn)}/mailFolders/inbox/messages?$filter=receivedDateTime ge '${new Date(Date.now()-60*24*60*60*1000).toISOString()}'&$select=id,subject,from,receivedDateTime,hasAttachments&$expand=attachments($select=id,name,contentType,size)&$top=50&$orderby=receivedDateTime desc`;
+  const url=`/users/${encodeURIComponent(upn)}/mailFolders/inbox/messages?$select=id,subject,from,receivedDateTime,hasAttachments&$expand=attachments($select=id,name,contentType,size)&$top=50&$orderby=receivedDateTime desc`;
   try{
     const d=await gGet(url,tok);
     return(d.value||[]).map(m=>({...m,_mailbox:upn}));
@@ -1067,10 +1067,10 @@ function App(){
     try{
       const tok=await getToken(config,account);setToken(tok);
       const msgs=await getSharedMailboxEmails(tok,AP_MAILBOX);
-      const enriched=msgs.map(m=>{
-        const pdfs=(m.attachments||[]).filter(a=>a.contentType==='application/pdf'||a.name?.toLowerCase().endsWith('.pdf'));
-        return{...m,pdfs};
-      });
+      const enriched=await Promise.all(msgs.map(async m=>{
+        try{const a=await getAttachments(tok,m.id,m._mailbox);return{...m,pdfs:a};}
+        catch{return{...m,pdfs:[]};}
+      }));
       const withPdfs=enriched.filter(m=>m.pdfs.length>0);
       setEmails(withPdfs);
       showToast(`${withPdfs.length} email${withPdfs.length!==1?'s':''} with PDFs found`,'success');
