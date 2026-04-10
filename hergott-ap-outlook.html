@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Hergott AP Invoice Processor — v0.4.0 build 20260410.005
+<!-- Hergott AP Invoice Processor — v0.4.0 build 20260410.006
      v0.1.0  2026-04-02  Initial working release
      v0.2.0  2026-04-09  Fix GL dropdown; PO Number field; CSV export
      v0.3.0  2026-04-09  Azure Function proxy; hardcoded credentials
@@ -38,42 +38,42 @@ html,body,#root{height:100%;overflow:hidden}
 body{font-family:'DM Sans',sans-serif;background:#E8E5DF;color:#1A1A18;font-size:13px;line-height:1.5}
 
 /* ── Setup Screen ── */
-.setup-overlay{position:fixed;inset:0;background:#1B3D2B;display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px}
+.setup-overlay{position:fixed;inset:0;background:#C41230;display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px}
 .setup-card{background:#fff;border-radius:8px;padding:36px 40px;max-width:580px;width:100%;box-shadow:0 24px 64px rgba(0,0,0,0.35);max-height:92vh;overflow-y:auto}
-.setup-logo{font-family:'Barlow Condensed',sans-serif;font-size:30px;font-weight:800;color:#1B3D2B;letter-spacing:-0.5px;margin-bottom:2px}
+.setup-logo{font-family:'Barlow Condensed',sans-serif;font-size:30px;font-weight:800;color:#C41230;letter-spacing:-0.5px;margin-bottom:2px}
 .setup-sub{font-size:11px;color:#AAA;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:28px}
 .setup-step{margin-bottom:22px}
-.setup-step-title{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:800;color:#1B3D2B;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid #EEE}
+.setup-step-title{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:800;color:#C41230;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid #EEE}
 .setup-steps{font-size:12px;color:#555;line-height:1.9;background:#F5F3EF;padding:11px 14px;border-radius:4px;margin-bottom:10px}
 .setup-steps code{font-family:'DM Mono',monospace;background:#E2DED8;padding:1px 5px;border-radius:3px;font-size:11px;color:#1A1A18}
 .field-group{margin-bottom:11px}
 .field-label{font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px}
 .field-input{width:100%;padding:8px 10px;border:1.5px solid #D0CEC9;border-radius:4px;font-size:12px;font-family:'DM Mono',monospace;background:#FAFAFA;color:#1A1A18;outline:none;transition:border-color 0.15s}
-.field-input:focus{border-color:#1B3D2B;background:#fff}
+.field-input:focus{border-color:#C41230;background:#fff}
 .field-hint{font-size:10px;color:#AAA;margin-top:3px}
-.btn-setup-save{width:100%;padding:12px;background:#1B3D2B;color:#fff;border:none;border-radius:5px;font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:800;letter-spacing:0.08em;cursor:pointer;text-transform:uppercase;margin-top:8px;transition:background 0.15s}
-.btn-setup-save:hover{background:#142E20}
+.btn-setup-save{width:100%;padding:12px;background:#C41230;color:#fff;border:none;border-radius:5px;font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:800;letter-spacing:0.08em;cursor:pointer;text-transform:uppercase;margin-top:8px;transition:background 0.15s}
+.btn-setup-save:hover{background:#A00E26}
 .btn-setup-save:disabled{background:#B0B0B0;cursor:not-allowed}
 
 /* ── App Shell ── */
 .app{height:100vh;display:flex;flex-direction:column;overflow:hidden}
-.app-header{background:#1B3D2B;color:#fff;padding:0 18px;height:50px;display:flex;align-items:center;gap:14px;flex-shrink:0}
+.app-header{background:#C41230;color:#fff;padding:0 18px;height:50px;display:flex;align-items:center;gap:14px;flex-shrink:0}
 .app-logo{font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;letter-spacing:-0.3px;white-space:nowrap}
-.app-logo span{color:#7DC4A0;font-weight:600}
+.app-logo span{color:#FFAAAA;font-weight:600}
 .header-divider{width:1px;height:22px;background:rgba(255,255,255,0.15)}
-.header-sub{font-size:11px;color:#7DC4A0;letter-spacing:0.04em;white-space:nowrap}
+.header-sub{font-size:11px;color:#FFAAAA;letter-spacing:0.04em;white-space:nowrap}
 .header-spacer{flex:1}
-.header-user{font-size:12px;color:#A8D5BC;display:flex;align-items:center;gap:10px}
+.header-user{font-size:12px;color:#FFCCCC;display:flex;align-items:center;gap:10px}
 .btn-sign-in{background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);color:#fff;padding:6px 16px;border-radius:4px;font-size:12px;font-family:'Barlow Condensed',sans-serif;font-weight:700;letter-spacing:0.06em;cursor:pointer;text-transform:uppercase;transition:background 0.15s;white-space:nowrap}
 .btn-sign-in:hover{background:rgba(255,255,255,0.22)}
-.btn-sign-out{background:none;border:none;color:#7DC4A0;font-size:11px;cursor:pointer;text-decoration:underline;padding:0}
+.btn-sign-out{background:none;border:none;color:#FFAAAA;font-size:11px;cursor:pointer;text-decoration:underline;padding:0}
 .app-body{flex:1;display:flex;overflow:hidden}
 
 /* ── Left Panel ── */
 .left-panel{width:372px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid #D0CEC9;background:#EAE7E1;overflow:hidden}
 .tabs{display:flex;background:#E0DDD7;border-bottom:1px solid #D0CEC9}
 .tab{flex:1;padding:10px 6px;text-align:center;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;cursor:pointer;color:#999;border-bottom:2px solid transparent;transition:all 0.15s;background:none;border-top:none;border-left:none;border-right:none}
-.tab.active{color:#1B3D2B;border-bottom-color:#1B3D2B;background:#EAE7E1}
+.tab.active{color:#C41230;border-bottom-color:#C41230;background:#EAE7E1}
 .tab:hover:not(.active){color:#555}
 
 .panel-section{padding:13px 14px;border-bottom:1px solid #D0CEC9}
@@ -82,8 +82,8 @@ body{font-family:'DM Sans',sans-serif;background:#E8E5DF;color:#1A1A18;font-size
 /* Outlook tab */
 .folder-row{display:flex;gap:7px;margin-bottom:7px}
 .folder-select{flex:1;padding:6px 8px;border:1px solid #D0CEC9;border-radius:4px;font-size:12px;background:#fff;color:#1A1A18;outline:none;cursor:pointer}
-.btn-scan{padding:6px 14px;background:#1B3D2B;color:#fff;border:none;border-radius:4px;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;white-space:nowrap;transition:background 0.15s;display:flex;align-items:center;gap:5px}
-.btn-scan:hover{background:#142E20}
+.btn-scan{padding:6px 14px;background:#C41230;color:#fff;border:none;border-radius:4px;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;white-space:nowrap;transition:background 0.15s;display:flex;align-items:center;gap:5px}
+.btn-scan:hover{background:#A00E26}
 .btn-scan:disabled{background:#B5B5B5;cursor:not-allowed}
 
 .email-list{max-height:200px;overflow-y:auto;border:1px solid #D0CEC9;border-radius:4px;background:#fff}
@@ -93,14 +93,14 @@ body{font-family:'DM Sans',sans-serif;background:#E8E5DF;color:#1A1A18;font-size
 .email-info{flex:1;min-width:0}
 .email-subject{font-size:12px;font-weight:600;color:#1A1A18;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .email-meta{font-size:10px;color:#AAA;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.email-badge{background:#E0EDE6;color:#1B3D2B;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;white-space:nowrap;flex-shrink:0}
-.btn-email-add{padding:4px 10px;background:#fff;border:1px solid #C0CEC5;color:#1B3D2B;border-radius:3px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;transition:background 0.1s}
+.email-badge{background:#E0EDE6;color:#C41230;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;white-space:nowrap;flex-shrink:0}
+.btn-email-add{padding:4px 10px;background:#fff;border:1px solid #C0CEC5;color:#C41230;border-radius:3px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;transition:background 0.1s}
 .btn-email-add:hover{background:#E0EDE6}
 .no-emails{padding:16px;text-align:center;font-size:12px;color:#BBB}
 
 /* Drop tab */
 .drop-zone{border:2px dashed #B8B5B0;border-radius:6px;padding:28px 20px;text-align:center;background:#fff;cursor:pointer;transition:all 0.15s;user-select:none}
-.drop-zone.active{border-color:#1B3D2B;background:#EAF2EE}
+.drop-zone.active{border-color:#C41230;background:#FFF0F0}
 .drop-zone-icon{font-size:30px;margin-bottom:8px}
 .drop-zone-text{font-size:13px;font-weight:600;color:#555;margin-bottom:3px}
 .drop-zone-hint{font-size:11px;color:#AAA}
@@ -110,7 +110,7 @@ body{font-family:'DM Sans',sans-serif;background:#E8E5DF;color:#1A1A18;font-size
 .queue-header{padding:9px 14px 8px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #D0CEC9;background:#EAE7E1;position:sticky;top:0;z-index:1;flex-shrink:0}
 .queue-label{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;color:#777;text-transform:uppercase;letter-spacing:0.07em;flex:1}
 .btn-extract-all{padding:5px 13px;background:#2D6A4F;color:#fff;border:none;border-radius:3px;font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;display:flex;align-items:center;gap:5px;transition:background 0.15s;white-space:nowrap}
-.btn-extract-all:hover{background:#1B3D2B}
+.btn-extract-all:hover{background:#C41230}
 .btn-extract-all:disabled{background:#B5B5B5;cursor:not-allowed}
 .queue-list{flex:1;overflow-y:auto}
 .queue-item{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #E4E1DC;background:#fff;transition:background 0.1s}
@@ -126,8 +126,8 @@ body{font-family:'DM Sans',sans-serif;background:#E8E5DF;color:#1A1A18;font-size
 .qi-status.processing{color:#D4A017}
 .qi-status.done{color:#2D6A4F}
 .qi-status.error{color:#C0392B}
-.btn-qi-extract{padding:3px 9px;background:#1B3D2B;color:#fff;border:none;border-radius:3px;font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;white-space:nowrap;flex-shrink:0}
-.btn-qi-extract:hover{background:#142E20}
+.btn-qi-extract{padding:3px 9px;background:#C41230;color:#fff;border:none;border-radius:3px;font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.btn-qi-extract:hover{background:#A00E26}
 .btn-qi-remove{background:none;border:none;color:#D0CEC9;font-size:15px;cursor:pointer;padding:2px 4px;flex-shrink:0;line-height:1;transition:color 0.1s}
 .btn-qi-remove:hover{color:#C0392B}
 .queue-empty{padding:20px;text-align:center;font-size:12px;color:#BBB}
@@ -154,7 +154,7 @@ body{font-family:'DM Sans',sans-serif;background:#E8E5DF;color:#1A1A18;font-size
 .usd-row{display:flex;gap:8px;align-items:center;margin-top:6px}
 .usd-label{font-size:11px;color:#6B4C00;white-space:nowrap}
 .usd-input{padding:4px 7px;border:1.5px solid #D0A830;border-radius:4px;font-size:12px;font-family:'DM Mono',monospace;width:100px;background:#FFFEF8}
-.usd-btn{padding:4px 10px;background:#1B3D2B;color:#fff;border:none;border-radius:4px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap}
+.usd-btn{padding:4px 10px;background:#C41230;color:#fff;border:none;border-radius:4px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap}
 .usd-converted{font-size:11px;color:#1B5E35;font-weight:700;margin-top:4px}
 .rc-filename{font-family:'DM Mono',monospace;font-size:11px;color:#999;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rc-conf{padding:3px 9px;border-radius:11px;font-size:11px;font-weight:700;white-space:nowrap;flex-shrink:0}
@@ -169,11 +169,11 @@ body{font-family:'DM Sans',sans-serif;background:#E8E5DF;color:#1A1A18;font-size
 .rc-field{}
 .rc-field-label{font-size:10px;font-weight:700;color:#AAA;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px}
 .rc-input{width:100%;padding:6px 8px;border:1.5px solid #E0DDD7;border-radius:4px;font-family:'DM Mono',monospace;font-size:12px;color:#1A1A18;background:#FAFAFA;outline:none;transition:border-color 0.15s}
-.rc-input:focus{border-color:#1B3D2B;background:#fff}
+.rc-input:focus{border-color:#C41230;background:#fff}
 .rc-input.warn{border-color:#E9A825;background:#FFFBF0}
 .rc-input.err{border-color:#C0392B;background:#FFF5F5}
 .rc-select{width:100%;padding:6px 8px;border:1.5px solid #E0DDD7;border-radius:4px;font-family:'DM Mono',monospace;font-size:11px;color:#1A1A18;background:#fff;outline:none;transition:border-color 0.15s;cursor:pointer}
-.rc-select:focus{border-color:#1B3D2B}
+.rc-select:focus{border-color:#C41230}
 .rc-select.warn{border-color:#E9A825}
 
 .rc-section-title{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;color:#777;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:8px;display:flex;align-items:center;gap:8px}
@@ -195,8 +195,8 @@ body{font-family:'DM Sans',sans-serif;background:#E8E5DF;color:#1A1A18;font-size
 .conf-dot.high{background:#2ECC71}
 .conf-dot.med{background:#F39C12}
 .conf-dot.low{background:#E74C3C}
-.btn-add-line{padding:5px 12px;background:#fff;border:1.5px dashed #C0C8C4;color:#1B3D2B;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;transition:all 0.15s;margin-bottom:2px}
-.btn-add-line:hover{background:#EAF2EE;border-color:#1B3D2B}
+.btn-add-line{padding:5px 12px;background:#fff;border:1.5px dashed #C0C8C4;color:#C41230;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;transition:all 0.15s;margin-bottom:2px}
+.btn-add-line:hover{background:#FFF0F0;border-color:#C41230}
 .btn-del-line{background:none;border:none;color:#D0CEC9;font-size:14px;cursor:pointer;padding:0 2px;line-height:1;transition:color 0.1s}
 .btn-del-line:hover{color:#C0392B}
 
@@ -209,7 +209,7 @@ body{font-family:'DM Sans',sans-serif;background:#E8E5DF;color:#1A1A18;font-size
 
 .rc-footer{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#F5F3EF;border-top:1px solid #E6E3DE}
 .rc-footer-label{font-size:12px;color:#777}
-.rc-total{font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;color:#1B3D2B}
+.rc-total{font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;color:#C41230}
 .rc-mismatch-warn{font-size:11px;color:#C0392B;font-weight:700}
 
 /* Export Bar */
@@ -218,14 +218,14 @@ body{font-family:'DM Sans',sans-serif;background:#E8E5DF;color:#1A1A18;font-size
 .export-info strong{color:#1A1A18}
 .export-info .blocked{color:#C0392B;font-weight:600}
 .export-info .clear{color:#1B5E35;font-weight:600}
-.btn-export{padding:10px 26px;background:#1B3D2B;color:#fff;border:none;border-radius:5px;font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:800;letter-spacing:0.07em;text-transform:uppercase;cursor:pointer;transition:background 0.15s;white-space:nowrap}
-.btn-export:hover{background:#142E20}
+.btn-export{padding:10px 26px;background:#C41230;color:#fff;border:none;border-radius:5px;font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:800;letter-spacing:0.07em;text-transform:uppercase;cursor:pointer;transition:background 0.15s;white-space:nowrap}
+.btn-export:hover{background:#A00E26}
 .btn-export:disabled{background:#B5B5B5;cursor:not-allowed}
 
 /* Toast */
 .toast{position:fixed;bottom:18px;right:18px;padding:11px 16px;border-radius:6px;font-size:12px;font-weight:600;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.22);max-width:340px;animation:fadeIn 0.2s}
 @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-.toast.success{background:#1B3D2B;color:#fff}
+.toast.success{background:#C41230;color:#fff}
 .toast.error{background:#C0392B;color:#fff}
 .toast.info{background:#2C3E50;color:#fff}
 
@@ -947,8 +947,8 @@ function USDConversionBanner({r,onUpdate}){
       <div className="usd-row">
         <span className="usd-label">Bank exchange fee:</span>
         <input className="usd-input" value={fee} onChange={e=>setFee(e.target.value)} placeholder="0"/>
-        <button className="usd-btn" style={{background:feeType==='$'?'#1B3D2B':'#888',padding:'4px 8px'}} onClick={()=>setFeeType('$')}>$</button>
-        <button className="usd-btn" style={{background:feeType==='%'?'#1B3D2B':'#888',padding:'4px 8px'}} onClick={()=>setFeeType('%')}>%</button>
+        <button className="usd-btn" style={{background:feeType==='$'?'#C41230':'#888',padding:'4px 8px'}} onClick={()=>setFeeType('$')}>$</button>
+        <button className="usd-btn" style={{background:feeType==='%'?'#C41230':'#888',padding:'4px 8px'}} onClick={()=>setFeeType('%')}>%</button>
       </div>
       {fetchErr&&<div style={{fontSize:11,color:'#B00',marginTop:4}}>{fetchErr}</div>}
       {cadTotal&&<div className="usd-converted">→ CAD Total: ${cadTotal}</div>}
@@ -997,7 +997,7 @@ function ReviewCard({item,result,onUpdate,onRemove,onAddCSV,onReextract,onUpload
         <span className="rc-filename">{item.name}</span>
         {item.source&&<span style={{fontSize:'10px',color:'#AAA',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:180,flexShrink:1}} title={item.source}>{item.source}</span>}
         <span className={`rc-conf ${confCls(oc)}`}>{pct(oc)}</span>
-        {item.b64&&<button className="btn-rc-remove" style={{marginRight:'4px',background:'#1B3D2B',color:'#fff',fontSize:'10px',padding:'2px 8px',borderRadius:'3px',border:'none',cursor:'pointer'}} onClick={()=>{const u=URL.createObjectURL(new Blob([Uint8Array.from(atob(item.b64),c=>c.charCodeAt(0))],{type:'application/pdf'}));window.open(u,'_blank');}}>PDF</button>}<button className="btn-rc-remove" onClick={onRemove}>×</button>
+        {item.b64&&<button className="btn-rc-remove" style={{marginRight:'4px',background:'#C41230',color:'#fff',fontSize:'10px',padding:'2px 8px',borderRadius:'3px',border:'none',cursor:'pointer'}} onClick={()=>{const u=URL.createObjectURL(new Blob([Uint8Array.from(atob(item.b64),c=>c.charCodeAt(0))],{type:'application/pdf'}));window.open(u,'_blank');}}>PDF</button>}<button className="btn-rc-remove" onClick={onRemove}>×</button>
       </div>
 
       {/* Collapsed view for skip/statement docs — no form, no export */}
@@ -1193,7 +1193,7 @@ function ReviewCard({item,result,onUpdate,onRemove,onAddCSV,onReextract,onUpload
         <span className="rc-footer-label">{isCC?'Balance Due':'Invoice Total'}</span>
         <div style={{display:'flex',gap:6,alignItems:'center'}}>
           {!isSkip&&!mismatch&&!isUSD&&<button
-            style={{padding:'4px 12px',background:r._addedToCSV?'#2D6A4F':'#1B3D2B',color:'#fff',border:'none',borderRadius:'4px',fontFamily:"'Barlow Condensed',sans-serif",fontSize:'13px',fontWeight:700,letterSpacing:'0.05em',textTransform:'uppercase',cursor:r._addedToCSV?'default':'pointer',opacity:r._addedToCSV?0.7:1}}
+            style={{padding:'4px 12px',background:r._addedToCSV?'#2D6A4F':'#C41230',color:'#fff',border:'none',borderRadius:'4px',fontFamily:"'Barlow Condensed',sans-serif",fontSize:'13px',fontWeight:700,letterSpacing:'0.05em',textTransform:'uppercase',cursor:r._addedToCSV?'default':'pointer',opacity:r._addedToCSV?0.7:1}}
             onClick={()=>!r._addedToCSV&&onAddCSV&&onAddCSV(item.id,r)}
             disabled={!!r._addedToCSV}
             title={r._addedToCSV?"Already added to today's CSV":"Append this document to today's OneDrive CSV"}>
@@ -1432,10 +1432,10 @@ function App(){
   return(
     <div className="app">
       <div className="app-header">
-        <div className="app-logo">Hergott <span>Farm Equipment</span></div>
+        <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAOYAAABBCAMAAADyrSjfAAAC/VBMVEUAAAD///////+/enfCFy/////8+/v////////59PX////////////////////////////////////////////////////////////9/Pz////////+/f7////////////////////////////////////////////////////////BjI/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////CEy7///////+iJCj////////////////NVWPDNkiwTFb///+7WWPAOku2GzD///////////+5V2KwJTS3Zm7VfIPJITmvKzjdn6WsKC68GCiqIS+1U1zOcXmqLTu1OEW2V1zTjZKrFie2HizIGS24Mj6hJS2dRky1R1GmKTK9HC62PUq/XmjDbHPTdH6vUFrvpKvro63k5N2gIS2lNkG8KDqxND3ERVKqFSC5U1rQMUPTfId4WFjWysjcq6P////BGSG+GiKwExqvExrCGCW2Gye6HSK/GSi7GyfIFSSxHiLFFybQESTMEh/LEiq1ICiwICq2HSGrJCn0wsS5Fx2YOjrGESn7+O6pMznGGSzFFh/77Ofx2tzovr7bi5C/Ymi7ECKqICHAESS1EyGlGxzr1M/vzMvam6LVl5jMZXLKL0WjO0K5Fyz8+vfnyMXgqavgoqS0NkCnKzr98uvu49jp29Hjzcv5zsrluLfkhIzXfoWyKzqZLjDaCyf44eX75dv2zNb72dPOoZ7jmpzmj5W+hYXNe37Jc3jQFDOuGSju7uXdbHnZWmnbTWLBVGCUQ0y+L0K8JTW0Ghq/FBn37d/Ywbvxubnsqq7zkp7VkpGyc3SyY2alR0iYJSf17fHu+O3QsKvJj5a9bXCoWVu2UVqtRlG3Pk/RO022RUqKQDuvITOQPDumGSv1pKuNS0/aEi6ZYmCqAAAAjnRSTlMA/URvp/oHaTsF9QoOIogQ9/ZK0hPiquqDHAzKPzN+uXodFdxvTxjjkjAtDvDfsY2fKu6/m2PYJufDV8ytc2BdN/PVo1pT5cW3rxYgtUIk/vKU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" alt="Hergott Farm Equipment" style={{height:'34px',width:'auto',marginRight:'4px'}}/>
         <div className="header-divider"/>
-        <div className="header-sub">AP Invoice Processor</div>
-        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.4.0 build 20260410.005</div>
+        <div className="header-sub" style={{color:'rgba(255,255,255,0.7)'}}>AP Invoice Processor</div>
+        <div style={{fontSize:'10px',color:'rgba(255,255,255,0.4)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.4.0 build 20260410.006</div>
         <div className="header-spacer"/>
         {account?(
           <div className="header-user">
@@ -1476,7 +1476,7 @@ function App(){
                             checked={checkedEmails.size===emails.length&&emails.length>0}
                             onChange={toggleCheckAll}/>
                           {checkedEmails.size===emails.length&&emails.length>0?'Uncheck All':'Check All'}
-                          {checkedEmails.size>0&&<span style={{color:'#1B3D2B'}}>({checkedEmails.size} selected)</span>}
+                          {checkedEmails.size>0&&<span style={{color:'#C41230'}}>({checkedEmails.size} selected)</span>}
                         </label>
                         {checkedEmails.size>0&&(
                           <button className="btn-scan" style={{padding:'3px 10px',fontSize:'11px'}}
