@@ -322,7 +322,7 @@ INVENTORY:
 13100=USED TRACTORS
 13200=USED EQUIPMENT
 14000=CNH-PARTS & ACCESSORIES (Case IH parts only)
-14001=NON CNH-PARTS & ACCESSORIES (all other parts)\nCRITICAL: Use 14000 ONLY when the VENDOR is CNH Industrial/Case IH/New Holland. If the vendor is any other supplier (Westward Parts, NAPA, etc.) use 14001 even if the parts are CNH-branded. The vendor name determines 14000 vs 14001, NOT the product description.
+14001=NON CNH-PARTS & ACCESSORIES (all other parts)
 
 OPERATING EXPENSES:
 00300=SALES TRUCK EXPENSE
@@ -873,7 +873,7 @@ function ReviewCard({item,result,onUpdate,onRemove}){
         <span className={`rc-doctype ${typeCls}`}>{typeLabel}</span>
         <span className="rc-filename">{item.name}</span>
         <span className={`rc-conf ${confCls(oc)}`}>{pct(oc)}</span>
-        <button className="btn-rc-remove" onClick={onRemove}>×</button>
+        {item.b64&&<button className="btn-rc-remove" style={{marginRight:'4px',background:'#1B3D2B',color:'#fff',fontSize:'10px',padding:'2px 8px',borderRadius:'3px',border:'none',cursor:'pointer'}} onClick={()=>{const u=URL.createObjectURL(new Blob([Uint8Array.from(atob(item.b64),c=>c.charCodeAt(0))],{type:'application/pdf'}));window.open(u,'_blank');}}>PDF</button>}<button className="btn-rc-remove" onClick={onRemove}>×</button>
       </div>
 
       <div className="rc-body">
