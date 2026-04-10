@@ -953,6 +953,7 @@ function ReviewCard({item,result,onUpdate,onRemove}){
               <th style={{width:180}}>GL Account</th>
               <th className="r" style={{width:76}}>Amount</th>
               {!isCC&&<th style={{width:34}} title="Cost Centre">CC</th>}
+              {!isCC&&<th style={{width:70}} title="Stock #">Stock #</th>}
               <th style={{width:38,textAlign:'center'}}>Conf</th>
               <th style={{width:22}}></th>
             </tr>
@@ -986,6 +987,8 @@ function ReviewCard({item,result,onUpdate,onRemove}){
                 {!isCC&&<td>
                   <input className="td-input" style={{width:30}} value={line.costCentre||''} placeholder="—"
                     onChange={e=>upLine(idx,'costCentre',e.target.value)}/>
+                </td>}{!isCC&&<td><input className="td-input" style={{width:70}} value={line.stockNum||''} placeholder="—"
+                    onChange={e=>upLine(idx,'stockNum',e.target.value)}/>
                 </td>}
                 <td style={{textAlign:'center'}}>
                   <span className={`conf-dot ${confCls(line.confidence||0)}`} title={pct(line.confidence||0)}/>
