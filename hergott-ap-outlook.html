@@ -1,10 +1,11 @@
 <!DOCTYPE html>
-<!-- Hergott AP Invoice Processor — v0.3.0 build 20260409.002
+<!-- Hergott AP Invoice Processor — v0.3.0 build 20260409.003
      v0.1.0  2026-04-02  Initial working release (MSAL + Outlook scan + Claude extraction + IntelliDealer CSV)
      v0.2.0  2026-04-09  Fix GL account dropdown reverting on change; add PO Number extraction, UI field, and CSV export
      v0.3.0  2026-04-09  Azure Function proxy — no setup screen, no keys in browser; MSAL client ID/tenant hardcoded
      build 20260409.001  Anonymous proxy auth; no function key in source
      build 20260409.002  Export filename includes time (HHMM) — unique per export, no overwrite in Downloads
+     build 20260409.003  Prompt: PO extraction targets Customer PO # specifically (not Order # or vendor reference); 14000 vendor rule made explicit
 -->
 <html lang="en">
 <head>
@@ -326,8 +327,8 @@ INVENTORY:
 12400=NEW NON-CNH EQUIPMENT
 13100=USED TRACTORS
 13200=USED EQUIPMENT
-14000=CNH-PARTS & ACCESSORIES (Case IH parts only)
-14001=NON CNH-PARTS & ACCESSORIES (all other parts)
+14000=CNH-PARTS & ACCESSORIES (ONLY when vendor is CASE, CASEU, CIHWAR, or 93724 — DO NOT use for any other vendor even if parts are CNH-branded)
+14001=NON CNH-PARTS & ACCESSORIES (ALL other vendors including Westward Parts, Bourgault, Degelman, etc. — use this even if the parts are CNH or Case IH branded)
 
 OPERATING EXPENSES:
 00300=SALES TRUCK EXPENSE
@@ -374,7 +375,7 @@ OPERATING EXPENSES:
 05100=MANAGEMENT FEES
 
 CODING DECISIONS:
-Case IH parts → 14000; non-Case parts → 14001
+Case IH parts → 14000 ONLY if vendor is CASE/CASEU/CIHWAR/93724; ALL other vendors → 14001 regardless of part brand
 New Case IH equipment → 12200; shortline new → 12400
 Case floor plan: principal → 20300, interest → 00900 costCentre=1
 SaskPower / utilities → 03800
@@ -642,7 +643,7 @@ vendorConfidence scale:
 
 STEP 3 — HEADER DATA:
 Invoices: extract invoice number, invoice date (YYYYMMDD), due date (YYYYMMDD — net 30 from invoice date if not stated).
-PO Number: look for any "PO #", "Purchase Order #", "Order #", "P.O.", or "Reference #" on the invoice. Extract the number as poNumber. If not found, leave blank.
+PO Number: Look specifically for a field labelled "Customer PO #", "Customer PO", "PO #", "Purchase Order #", or "P.O." on the invoice — this is YOUR customer's internal PO reference and may contain names, codes, or descriptions (e.g. "JeanTremel/JP"). Extract it exactly as printed. Do NOT use "Order #", "Original Order #", "Shipment #", "Reference #", or vendor-assigned numbers — those are NOT the customer PO. If no customer PO field is found, leave blank.
 CC statements: extract statement date, period start, period end (all YYYYMMDD), balance due, minimum payment.
 payableAcct: "20040" ONLY for CASE, CASEU, or 93724 — "20000" for all other vendors.
 
@@ -1089,7 +1090,7 @@ function App(){
         <div className="app-logo">Hergott <span>Farm Equipment</span></div>
         <div className="header-divider"/>
         <div className="header-sub">AP Invoice Processor</div>
-        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.3.0 build 1</div>
+        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.3.0 build 20260409.003</div>
         <div className="header-spacer"/>
         {account?(
           <div className="header-user">
