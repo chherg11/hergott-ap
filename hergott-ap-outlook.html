@@ -1,4 +1,11 @@
 <!DOCTYPE html>
+<!-- Hergott AP Invoice Processor — v0.3.0 build 20260409.002
+     v0.1.0  2026-04-02  Initial working release (MSAL + Outlook scan + Claude extraction + IntelliDealer CSV)
+     v0.2.0  2026-04-09  Fix GL account dropdown reverting on change; add PO Number extraction, UI field, and CSV export
+     v0.3.0  2026-04-09  Azure Function proxy — no setup screen, no keys in browser; MSAL client ID/tenant hardcoded
+     build 20260409.001  Anonymous proxy auth; no function key in source
+     build 20260409.002  Export filename includes time (HHMM) — unique per export, no overwrite in Downloads
+-->
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
@@ -45,8 +52,6 @@ body{font-family:'DM Sans',sans-serif;background:#E8E5DF;color:#1A1A18;font-size
 .btn-sign-in{background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);color:#fff;padding:6px 16px;border-radius:4px;font-size:12px;font-family:'Barlow Condensed',sans-serif;font-weight:700;letter-spacing:0.06em;cursor:pointer;text-transform:uppercase;transition:background 0.15s;white-space:nowrap}
 .btn-sign-in:hover{background:rgba(255,255,255,0.22)}
 .btn-sign-out{background:none;border:none;color:#7DC4A0;font-size:11px;cursor:pointer;text-decoration:underline;padding:0}
-.btn-gear{background:none;border:none;color:#7DC4A0;font-size:17px;cursor:pointer;padding:4px 6px;opacity:0.7;transition:opacity 0.15s}
-.btn-gear:hover{opacity:1}
 .app-body{flex:1;display:flex;overflow:hidden}
 
 /* ── Left Panel ── */
@@ -494,71 +499,54 @@ const VENDOR_DROPDOWN=[
   {c:'DENTAL',n:'DENTAL WEEKLY INDEMNITY'},{c:'ADVANC',n:'MID-MONTH ADVANCES'},
 ];
 
-// ── Config ───────────────────────────────────────────────────────────────────
-function loadConfig(){
-  return{
-    clientId:localStorage.getItem('hfe_clientId')||'',
-    tenantId:localStorage.getItem('hfe_tenantId')||'',
-    clientSecret:localStorage.getItem('hfe_clientSecret')||'',
-    apiKey:localStorage.getItem('hfe_apiKey')||'',
-  };
-}
-function saveConfig(cfg){
-  localStorage.setItem('hfe_clientId',cfg.clientId);
-  localStorage.setItem('hfe_tenantId',cfg.tenantId);
-  localStorage.setItem('hfe_clientSecret',cfg.clientSecret);
-  localStorage.setItem('hfe_apiKey',cfg.apiKey);
-}
+// ── Config (hardcoded — keys stored in Azure, not browser) ───────────────────
+const CLIENT_ID='2deb4da2-4a75-423e-a51b-eae62cd74332';
+const TENANT_ID='11435cd4-2fb6-4d2e-8298-2c2ad9694709';
 
 // ── MSAL ─────────────────────────────────────────────────────────────────────
 // _msalReady is a Promise that resolves to the initialized PublicClientApplication.
 // initialize() is called exactly once; all callers await the same promise.
 let _msalReady=null;
 
-function getMsalReady(cfg){
-  if(!_msalReady&&cfg.clientId&&cfg.tenantId){
+function getMsalReady(){
+  if(!_msalReady){
     const inst=new msal.PublicClientApplication({
       auth:{
-        clientId:cfg.clientId,
-        authority:`https://login.microsoftonline.com/${cfg.tenantId}`,
+        clientId:CLIENT_ID,
+        authority:`https://login.microsoftonline.com/${TENANT_ID}`,
         redirectUri:`${window.location.origin}${window.location.pathname.replace(/\/[^\/]*$/, '/redirect.html')}`,
       },
       cache:{cacheLocation:'sessionStorage',storeAuthStateInCookie:false},
     });
-    // initialize() must be called once before any loginPopup/acquireToken call
     _msalReady=inst.initialize().then(()=>inst);
   }
-  return _msalReady||Promise.reject(new Error('MSAL not configured — check clientId and tenantId'));
+  return _msalReady;
 }
 
 function resetMsal(){ _msalReady=null; }
 
 const SCOPES=['User.Read','Mail.Read'];
 
-async function signIn(cfg){
-  const inst=await getMsalReady(cfg);
+async function signIn(){
+  const inst=await getMsalReady();
   const r=await inst.loginPopup({scopes:SCOPES});
   return r.account;
 }
 
-async function signOut(cfg){
+async function signOut(){
   try{
-    const inst=await getMsalReady(cfg);
+    const inst=await getMsalReady();
     await inst.logoutPopup();
   }catch{}
   resetMsal();
 }
 
-async function getToken(cfg,account){
-  const inst=await getMsalReady(cfg);
+async function getToken(account){
+  const inst=await getMsalReady();
   try{
-    // Always try silent first — uses cached token or refresh token
     const r=await inst.acquireTokenSilent({scopes:SCOPES,account});
     return r.accessToken;
   }catch(e){
-    // Only fall back to popup when interaction is explicitly required
-    // (expired session, consent needed, MFA challenge, etc.)
-    // Catching all errors here would cause unnecessary popup prompts
     const isInteractionRequired=
       e instanceof msal.InteractionRequiredAuthError||
       e?.errorCode==='interaction_required'||
@@ -568,7 +556,7 @@ async function getToken(cfg,account){
       const r=await inst.acquireTokenPopup({scopes:SCOPES,account});
       return r.accessToken;
     }
-    throw e; // re-throw non-auth errors (network, config problems, etc.)
+    throw e;
   }
 }
 
@@ -629,8 +617,10 @@ async function markAsRead(tok,msgId,upn){
     });
   }catch{}
 }
-// ── Anthropic extraction ─────────────────────────────────────────────────────
-async function extractDoc(b64,name,apiKey){
+// ── Anthropic extraction (via Azure Function proxy) ──────────────────────────
+const PROXY_URL='https://hergott-ap-proxy-b5fxb3amb8evene3.canadacentral-01.azurewebsites.net/api/anthropic-proxy';
+
+async function extractDoc(b64,name){
   const prompt=`You are a precise AP processor for Hergott Farm Equipment Ltd., a Case IH agricultural equipment dealership in Humboldt, Saskatchewan, Canada. Extract all invoice data for entry into the IntelliDealer ERP system.
 
 STEP 1 — IDENTIFY DOCUMENT TYPE:
@@ -682,14 +672,9 @@ For cc_statement:
   for(let i=0;i<3;i++){
     if(i>0)await new Promise(r=>setTimeout(r,2000*i));
     try{
-      const res=await fetch('https://api.anthropic.com/v1/messages',{
+      const res=await fetch(PROXY_URL,{
         method:'POST',
-        headers:{
-          'Content-Type':'application/json',
-          'x-api-key':apiKey,
-          'anthropic-version':'2023-06-01',
-          'anthropic-dangerous-direct-browser-access':'true',
-        },
+        headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
           model:MODEL,max_tokens:8000,
           messages:[{role:'user',content:[
@@ -759,87 +744,6 @@ function confCls(c){return c>=0.85?'high':c>=0.65?'med':'low';}
 function pct(c){return Math.round((c||0)*100)+'%';}
 
 // ── Setup Screen ──────────────────────────────────────────────────────────────
-function SetupScreen({onSave}){
-  const[form,setForm]=useState(loadConfig());
-  const ok=form.clientId&&form.tenantId&&form.apiKey;
-  const set=k=>e=>setForm(f=>({...f,[k]:e.target.value.trim()}));
-  return(
-    <div className="setup-overlay">
-      <div className="setup-card">
-        <div className="setup-logo">Hergott Farm Equipment</div>
-        <div className="setup-sub">AP Invoice Processor — First-Time Setup</div>
-
-        <div className="setup-step">
-          <div className="setup-step-title">Step 1 — Azure App Registration</div>
-          <div className="setup-steps">
-            1. Go to <code>portal.azure.com</code> → Azure Active Directory → App registrations → New registration<br/>
-            2. Name: <code>Hergott AP Processor</code> · Account type: <code>Single tenant</code><br/>
-            3. Redirect URI: <code>Single-page application (SPA)</code> → enter this page's full URL<br/>
-            &nbsp;&nbsp;&nbsp;(e.g. <code>http://localhost:8080/hergott-ap-outlook.html</code>)<br/>
-            4. After creating: API permissions → Add → Microsoft Graph → Delegated → add:<br/>
-            &nbsp;&nbsp;&nbsp;<code>Mail.Read</code> and <code>User.Read</code><br/>
-            5. Copy Application (client) ID and Directory (tenant) ID below
-          </div>
-          <div className="field-group">
-            <div className="field-label">Application (Client) ID</div>
-            <input className="field-input" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-              value={form.clientId} onChange={set('clientId')}/>
-          </div>
-          <div className="field-group">
-            <div className="field-label">Directory (Tenant) ID</div>
-            <input className="field-input" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-              value={form.tenantId} onChange={set('tenantId')}/>
-          </div>
-        </div>
-
-        <div className="setup-step">
-          <div className="setup-step-title">Step 2 — App Client Secret</div>
-          <div className="setup-steps">
-            In Entra → App registrations → Hergott AP Processor → Certificates &amp; secrets.<br/>
-            Use the <code>AP Mailbox Reader</code> secret value.
-          </div>
-          <div className="field-group">
-            <div className="field-label">Client Secret</div>
-            <input className="field-input" type="password" placeholder="client secret value..."
-              value={form.clientSecret} onChange={set('clientSecret')}/>
-            <div className="field-hint">Stored in browser localStorage. Used only to read the AP shared mailbox.</div>
-          </div>
-        </div>
-
-        <div className="setup-step">
-          <div className="setup-step-title">Step 3 — Anthropic API Key</div>
-          <div className="setup-steps">
-            Get your key at <code>console.anthropic.com</code> → API Keys → Create key.<br/>
-            Set a <code>$20/month</code> spending limit. Cost is ~$0.10–0.20 per document.
-          </div>
-          <div className="field-group">
-            <div className="field-label">Anthropic API Key</div>
-            <input className="field-input" type="password" placeholder="sk-ant-api03-..."
-              value={form.apiKey} onChange={set('apiKey')}/>
-            <div className="field-hint">Stored in browser localStorage only. Used only for Anthropic API calls.</div>
-          </div>
-        </div>
-
-        <div className="setup-step">
-          <div className="setup-step-title">Hosting Note</div>
-          <div className="setup-steps">
-            MSAL requires this file to be served over HTTP, not opened as a local file.<br/>
-            Simplest option: open a terminal in this file's folder and run:<br/>
-            <code>python -m http.server 8080</code><br/>
-            Then open <code>http://localhost:8080/hergott-ap-outlook.html</code><br/>
-            Register that URL as the SPA redirect URI in Azure.
-          </div>
-        </div>
-
-        <button className="btn-setup-save" disabled={!ok}
-          onClick={()=>{saveConfig(form);onSave(form);}}>
-          Save & Open App
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ── Review Card ───────────────────────────────────────────────────────────────
 function ReviewCard({item,result,onUpdate,onRemove}){
   const r=result;
@@ -1038,7 +942,6 @@ function Toast({toast}){
 
 // ── App ───────────────────────────────────────────────────────────────────────
 function App(){
-  const[config,setConfig]=useState(loadConfig);
   const[account,setAccount]=useState(null);
   const[token,setToken]=useState(null);
   const[folders,setFolders]=useState([]);
@@ -1053,8 +956,6 @@ function App(){
   const dropRef=useRef(null);
   const fileRef=useRef(null);
 
-  const needsSetup=!config.clientId||!config.tenantId||!config.apiKey;
-
   function showToast(msg,type='info',ms=3500){
     setToast({msg,type});
     setTimeout(()=>setToast(null),ms);
@@ -1067,24 +968,23 @@ function App(){
 
   async function handleSignIn(){
     try{
-      const acc=await signIn(config);
+      const acc=await signIn();
       setAccount(acc);
-      const tok=await getToken(config,acc);
+      const tok=await getToken(acc);
       setToken(tok);
       showToast(`Signed in as ${acc.username}`,'success');
     }catch(e){showToast(`Sign-in failed: ${e.message}`,'error',6000);}
   }
   async function handleSignOut(){
-    try{await signOut(config);}catch{}
+    try{await signOut();}catch{}
     setAccount(null);setToken(null);setEmails([]);
-    // _msalReady reset inside signOut — allows fresh init if user signs back in
   }
 
     async function handleScan(){
     if(!token){showToast('Sign in first','error');return;}
     setScanning(true);setEmails([]);
     try{
-      const tok=await getToken(config,account);setToken(tok);
+      const tok=await getToken(account);setToken(tok);
       const msgs=await getUnreadEmails(tok,folderId);
       const enriched=await Promise.all(
         msgs.filter(m=>m.hasAttachments).map(async m=>{
@@ -1105,7 +1005,7 @@ function App(){
       const id=`${msg.id}_${att.id}`;
       if(queue.find(q=>q.id===id))continue;
       try{
-        const tok=await getToken(config,account);setToken(tok);
+        const tok=await getToken(account);setToken(tok);
         const b64=await getAttachmentB64(tok,msg.id,att.id,msg._mailbox);
         await markAsRead(tok,msg.id,msg._mailbox);
         setQueue(q=>[...q,{id,name:att.name,b64,source:msg.subject||msg.from?.emailAddress?.address||'Outlook',status:'pending'}]);
@@ -1130,7 +1030,7 @@ function App(){
   async function extractItem(item){
     setQueue(q=>q.map(x=>x.id===item.id?{...x,status:'processing'}:x));
     try{
-      const r=await extractDoc(item.b64,item.name,config.apiKey);
+      const r=await extractDoc(item.b64,item.name);
       setResults(prev=>({...prev,[item.id]:r}));
       setQueue(q=>q.map(x=>x.id===item.id?{...x,status:'done'}:x));
     }catch(e){
@@ -1174,14 +1074,14 @@ function App(){
   function handleExport(){
     if(!exportable.length)return;
     const csv=buildCSV(exportable.map(item=>results[item.id]));
-    const ts=new Date().toISOString().slice(0,10).replace(/-/g,'');
-    downloadCSV(csv,`Hergott_AP_${ts}.csv`);
+    const now=new Date();
+    const date=now.toISOString().slice(0,10).replace(/-/g,'');
+    const time=now.toTimeString().slice(0,5).replace(':','');
+    downloadCSV(csv,`Hergott_AP_${date}_${time}.csv`);
     showToast(`Exported ${exportable.length} document${exportable.length!==1?'s':''} to IntelliDealer CSV`,'success');
   }
 
   const pendingCount=queue.filter(x=>x.status==='pending').length;
-
-  if(needsSetup)return<SetupScreen onSave={cfg=>{setConfig(cfg);}}/>;
 
   return(
     <div className="app">
@@ -1189,6 +1089,7 @@ function App(){
         <div className="app-logo">Hergott <span>Farm Equipment</span></div>
         <div className="header-divider"/>
         <div className="header-sub">AP Invoice Processor</div>
+        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.3.0 build 1</div>
         <div className="header-spacer"/>
         {account?(
           <div className="header-user">
@@ -1198,8 +1099,6 @@ function App(){
         ):(
           <button className="btn-sign-in" onClick={handleSignIn}>Sign In with Microsoft</button>
         )}
-        <button className="btn-gear" title="Reset configuration"
-          onClick={()=>{if(confirm('Reset all saved configuration?')){localStorage.removeItem('hfe_clientId');localStorage.removeItem('hfe_tenantId');localStorage.removeItem('hfe_clientSecret');localStorage.removeItem('hfe_apiKey');resetMsal();window.location.reload();}}}>⚙</button>
       </div>
 
       <div className="app-body">
