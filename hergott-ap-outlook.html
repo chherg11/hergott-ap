@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Hergott AP Invoice Processor — v0.4.0 build 20260409.004
+<!-- Hergott AP Invoice Processor — v0.4.0 build 20260409.011
      v0.1.0  2026-04-02  Initial working release
      v0.2.0  2026-04-09  Fix GL dropdown; PO Number field; CSV export
      v0.3.0  2026-04-09  Azure Function proxy; hardcoded credentials
@@ -9,6 +9,13 @@
      v0.4.0 build 20260409.001  Doc type detection; USD conversion; payment terms; dept account warnings; MISC vendor; CGC field
      v0.4.0 build 20260409.002  Email list checkboxes: check all, check individual, Add Selected to Queue
      v0.4.0 build 20260409.003  Bug fixes: SKIP cards collapsed; Colony WO rule; dept warning list narrowed; credit memo total red
+     v0.4.0 build 20260409.004  Stock # always blank on supplier invoices; PO Branch confirmed always blank
+     v0.4.0 build 20260409.005  Fix blank page: JSX Fragment structure for !isSkip conditional
+     v0.4.0 build 20260409.006  Rate limit: 4s delay between batch extractions; 429 → 62s retry wait (4 attempts)
+     v0.4.0 build 20260409.007  PO Number always blank; Colony WO = valid AP invoice; VRC rule strengthened; due date priority; 30th of month fix; export bar breakdown
+     v0.4.0 build 20260409.008  Graph API sequential attachment listing (300ms gap); use /$value for downloads
+     v0.4.0 build 20260409.009  Scan deferred — show all emails instantly (1 API call), fetch PDFs only on Add to Batch
+     v0.4.0 build 20260409.010  Queue → Batch rename; per-document "+ Add to CSV" button; OneDrive daily file; Files.ReadWrite scope
      v0.4.0 build 20260409.011  SharePoint CSV: writes to hergottfarmequipment.sharepoint.com/Documents/AP Batches/ (shared, requires Sites.ReadWrite.All + admin consent in Azure)
 -->
 <html lang="en">
