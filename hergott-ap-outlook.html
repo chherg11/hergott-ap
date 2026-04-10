@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Hergott AP Invoice Processor — v0.4.0 build 20260409.003
+<!-- Hergott AP Invoice Processor — v0.4.0 build 20260409.004
      v0.1.0  2026-04-02  Initial working release
      v0.2.0  2026-04-09  Fix GL dropdown; PO Number field; CSV export
      v0.3.0  2026-04-09  Azure Function proxy; hardcoded credentials
@@ -7,7 +7,9 @@
      build 20260409.002  Export filename includes HHMM timestamp
      build 20260409.003  Prompt: Customer PO # rule; 14000 vendor rule explicit
      v0.4.0 build 20260409.001  Doc type detection; USD conversion; payment terms; dept account warnings; MISC vendor; CGC field
-     v0.4.0 build 20260409.004  Stock # always blank on supplier invoices (part numbers ≠ stock numbers); PO Branch confirmed always blank
+     v0.4.0 build 20260409.002  Email list checkboxes: check all, check individual, Add Selected to Queue
+     v0.4.0 build 20260409.003  Bug fixes: SKIP cards collapsed; Colony WO rule; dept warning list narrowed; credit memo total red
+     v0.4.0 build 20260409.005  Fix blank page: JSX Fragment structure for !isSkip conditional (rc-body + rc-footer)
 -->
 <html lang="en">
 <head>
@@ -905,7 +907,7 @@ function ReviewCard({item,result,onUpdate,onRemove}){
         </div>
       )}
 
-      {!isSkip&&<div className="rc-body">
+      {!isSkip&&(<><div className="rc-body">
         {/* USD conversion banner */}
         {isUSD&&<USDConversionBanner r={r} onUpdate={onUpdate}/>}
         {/* Header fields */}
@@ -1060,7 +1062,7 @@ function ReviewCard({item,result,onUpdate,onRemove}){
         {mismatch&&<span className="rc-mismatch-warn">Blocked — GL lines don't balance</span>}
         <span className="rc-total" style={{color:isCreditMemo?'#C0392B':undefined}}>${(total||0).toFixed(2)}</span>
       </div>
-    </div>}
+    </>)}
     </div>
   );
 }
@@ -1237,7 +1239,7 @@ function App(){
         <div className="app-logo">Hergott <span>Farm Equipment</span></div>
         <div className="header-divider"/>
         <div className="header-sub">AP Invoice Processor</div>
-        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.4.0 build 20260409.004</div>
+        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.4.0 build 20260409.005</div>
         <div className="header-spacer"/>
         {account?(
           <div className="header-user">
