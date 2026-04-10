@@ -9,7 +9,7 @@
      v0.4.0 build 20260409.001  Doc type detection; USD conversion; payment terms; dept account warnings; MISC vendor; CGC field
      v0.4.0 build 20260409.002  Email list checkboxes: check all, check individual, Add Selected to Queue
      v0.4.0 build 20260409.003  Bug fixes: SKIP cards collapsed; Colony WO rule; dept warning list narrowed; credit memo total red
-     v0.4.0 build 20260409.005  Fix blank page: JSX Fragment structure for !isSkip conditional (rc-body + rc-footer)
+     v0.4.0 build 20260409.011  SharePoint CSV: writes to hergottfarmequipment.sharepoint.com/Documents/AP Batches/ (shared, requires Sites.ReadWrite.All + admin consent in Azure)
 -->
 <html lang="en">
 <head>
@@ -539,7 +539,7 @@ function getMsalReady(){
 
 function resetMsal(){ _msalReady=null; }
 
-const SCOPES=['User.Read','Mail.Read'];
+const SCOPES=['User.Read','Mail.Read','Sites.ReadWrite.All'];
 
 async function signIn(){
   const inst=await getMsalReady();
@@ -614,10 +614,7 @@ async function getAttachments(tok,msgId,upn){
 }
 async function getAttachmentB64(tok,msgId,attId,upn){
   const base=upn?`/users/${encodeURIComponent(upn)}`:`/me`;
-  try{
-    const d=await gGet(`${base}/messages/${msgId}/attachments/${attId}?$select=contentBytes`,tok);
-    if(d.contentBytes)return d.contentBytes;
-  }catch{}
+  // Use /$value for binary download — works for all sizes, avoids 400s from $select=contentBytes
   return gBinary(`${base}/messages/${msgId}/attachments/${attId}/$value`,tok);
 }
 
@@ -667,12 +664,14 @@ STEP 3 — HEADER DATA:
 PO Number: Look ONLY for a field explicitly labelled "Customer PO #", "Customer PO", "PO #", "Purchase Order #", or "P.O." — this is Hergott's internal reference, may contain names or codes (e.g. "JeanTremel/JP", "313BTT"). Extract exactly as printed. Do NOT use "Order #", "Original Order #", "Shipment #", "Reference #", or any vendor-assigned numbers. Leave blank if not found.
 payableAcct: "20040" ONLY for CASE, CASEU, or 93724 — "20000" for all others.
 Currency: check if invoice is in USD. If USD → set currency="USD", add warning "USD INVOICE — convert to CAD before posting"
+poNumber: always leave blank "".
 
-PAYMENT TERMS — calculate dueDate precisely:
+PAYMENT TERMS — calculate dueDate:
+- FIRST: if the invoice explicitly prints a due date, use it exactly — do not override with terms calculation
 - "Net 30" or no terms stated → dueDate = invoiceDate + 30 days
 - "Due Upon Receipt" / "Due on Receipt" / "Due Immediately" → dueDate = invoiceDate
-- "30th of the following month" → dueDate = last day of the month AFTER invoice month (e.g. invoice Apr 7 → due May 31)
-- "BN30" or "BN30 Net 30" → dueDate = last day of invoice month + 30 days (e.g. invoice Apr 7 → Apr 30 + 30 = May 30)
+- "30th of the following month" → dueDate = the 30th day of the month following the invoice month (e.g. invoice Apr 7 → May 30 = 20260530; invoice Dec 7 → Jan 30)
+- "BN30" or "BN30 Net 30" → dueDate = last day of invoice month + 30 days (e.g. invoice Apr 7 → Apr 30 + 30 = May 30 = 20260530)
 - "2/10 Net 30" → use Net 30 date
 - All dates in YYYYMMDD format
 
@@ -684,11 +683,11 @@ DEPARTMENTAL ACCOUNTS — these specific accounts are split across multiple prof
 DO NOT add departmental warning for: 01100 PARTS FREIGHT (always dept 3), 01101 ENVIRONMENTAL CHARGE (always dept 3), 01400 SHOP SUPP (always dept 4), 01510-01560 DELIVERY TRUCK (always dept 6), 00900 FLOOR PLAN INTEREST (always dept 1)
 
 VENDOR-SPECIFIC RULES:
-- VitalEdge / VitalECM / VRC / Vital Records Control → vendorCode="97387", GL 04500 COMPUTER SERVICES
+- VitalEdge / VitalECM / VRC / Vital Records Control / vrcnetwork.com → vendorCode="97387" (ALWAYS — this is a known vendor, do NOT use MISC)
 - Westward Parts → always 14001, never 14000
 - Golden West Broadcasting / BOLT 107.5 / DiscoverHumboldt → GL 00601 ADVERTISING + departmental warning
 - Rawlco Radio → GL 00601 ADVERTISING + departmental warning
-- Colony Chevrolet GMC / Colony Chev → vendorCode="91033", GL 01500 TRUCK EXPENSE — these are vehicle repair invoices FROM Colony TO Hergott, they ARE valid AP invoices; do NOT classify as "other"
+- Colony Chevrolet GMC / Colony Chev → vendorCode="91033", GL 01500 TRUCK EXPENSE. Colony invoices Hergott for vehicle service work — this IS a valid AP invoice payable by Hergott, classify as supplier_invoice. Do NOT classify as "other".
 - Canadian Energy / CDN Energy → vendorCode="MISC"
 - Ag Express Electronics → vendorCode="MISC"; if USD set currency="USD"
 
@@ -717,8 +716,11 @@ For cc_statement:
 {"docType":"cc_statement","vendorCode":"97392","vendorName":"SCOTIABANK - VISA BOX 4100","vendorConfidence":1.0,"statementDate":"YYYYMMDD","periodStart":"YYYYMMDD","periodEnd":"YYYYMMDD","balanceDue":0.00,"minimumPayment":0.00,"currency":"CAD","transactions":[{"date":"YYYYMMDD","description":"","amount":0.00,"glAcct":"00000","glName":"","confidence":0.0}],"warnings":[],"overallConfidence":0.0,"notes":""}`;
 
   let lastErr;
-  for(let i=0;i<3;i++){
-    if(i>0)await new Promise(r=>setTimeout(r,2000*i));
+  for(let i=0;i<4;i++){
+    if(i>0){
+      const wait=lastErr&&lastErr.message?.includes('429')?62000:2000*i;
+      await new Promise(r=>setTimeout(r,wait));
+    }
     try{
       const res=await fetch(PROXY_URL,{
         method:'POST',
@@ -785,6 +787,43 @@ function downloadCSV(content,filename){
   const a=document.createElement('a');
   a.href=u;a.download=filename;a.click();
   URL.revokeObjectURL(u);
+}
+
+// ── SharePoint CSV (daily accumulating file, shared with all AP staff) ─────────
+const SP_SITE='hergottfarmequipment.sharepoint.com,ec9959c7-2e54-4016-9209-9ca22db82da9,87f2bb7e-cc3c-4126-9e1a-dfef8ffc8713';
+const CSV_HEADER='Record ID,Company,Vendor#,Division,Invoice Total,Discount Amount,Invoice #,Bank Cost Center,Bank Account #,Payable Cost Center,Payable Account #,Discount Cost Center,Discount Account #,PO Number,PO Branch,Purchase Date,Due Date,GL Amount,GL Cost Center,GL Account #,Complete Goods Code,Stock #,Description,A/R customer number';
+
+function getCSVFilename(){
+  const d=new Date();
+  const ds=d.toISOString().slice(0,10).replace(/-/g,'');
+  return `Hergott_AP_${ds}.csv`;
+}
+
+async function appendToOneDrive(tok, csvRows){
+  const filename=getCSVFilename();
+  const filePath=`AP Batches/${filename}`;
+  const url=`https://graph.microsoft.com/v1.0/sites/${SP_SITE}/drive/root:/${encodeURIComponent(filePath)}:/content`;
+
+  // Read existing file if it exists
+  let existing='';
+  try{
+    const r=await fetch(url,{headers:{Authorization:`Bearer ${tok}`}});
+    if(r.ok)existing=await r.text();
+  }catch{}
+
+  // Prepend header if new file
+  const hasHeader=existing.includes('Record ID,Company');
+  const newContent=hasHeader
+    ?existing.trimEnd()+'\r\n'+csvRows
+    :CSV_HEADER+'\r\n'+csvRows;
+
+  const w=await fetch(url,{
+    method:'PUT',
+    headers:{Authorization:`Bearer ${tok}`,'Content-Type':'text/csv'},
+    body:newContent
+  });
+  if(!w.ok){const t=await w.text();throw new Error(`SharePoint write failed ${w.status}: ${t.slice(0,200)}`);}
+  return `hergottfarmequipment.sharepoint.com → Documents/AP Batches/${filename}`;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -859,7 +898,7 @@ function USDConversionBanner({r,onUpdate}){
 }
 
 // ── Review Card ───────────────────────────────────────────────────────────────
-function ReviewCard({item,result,onUpdate,onRemove}){
+function ReviewCard({item,result,onUpdate,onRemove,onAddCSV}){
   const r=result;
   const isCC=r.docType==='cc_statement';
   const lines=isCC?(r.transactions||[]):(r.lines||[]);
@@ -1059,7 +1098,12 @@ function ReviewCard({item,result,onUpdate,onRemove}){
 
       <div className="rc-footer">
         <span className="rc-footer-label">{isCC?'Balance Due':'Invoice Total'}</span>
-        {mismatch&&<span className="rc-mismatch-warn">Blocked — GL lines don't balance</span>}
+        {!isSkip&&!mismatch&&!isUSD&&<button
+          style={{padding:'4px 12px',background:'#1B3D2B',color:'#fff',border:'none',borderRadius:'4px',fontFamily:"'Barlow Condensed',sans-serif",fontSize:'13px',fontWeight:700,letterSpacing:'0.05em',textTransform:'uppercase',cursor:'pointer'}}
+          onClick={()=>onAddCSV&&onAddCSV(r)}
+          title="Append this document to today's OneDrive CSV">
+          + Add to CSV
+        </button>}
         <span className="rc-total" style={{color:isCreditMemo?'#C0392B':undefined}}>${(total||0).toFixed(2)}</span>
       </div>
     </>)}
@@ -1120,31 +1164,32 @@ function App(){
     try{
       const tok=await getToken(account);setToken(tok);
       const msgs=await getUnreadEmails(tok,folderId);
-      const enriched=await Promise.all(
-        msgs.filter(m=>m.hasAttachments).map(async m=>{
-          try{const a=await getAttachments(tok,m.id,m._mailbox);return{...m,pdfs:a};}
-          catch{return{...m,pdfs:[]};}
-        })
-      );
-      const withPdfs=enriched.filter(m=>m.pdfs.length>0);
-      setEmails(withPdfs);
-      showToast(`${withPdfs.length} email${withPdfs.length!==1?'s':''} with PDFs found`,'success');
+      // Show all emails with attachments immediately — no per-email API calls
+      // PDF attachment details fetched later when user adds to queue
+      const withAtts=msgs.filter(m=>m.hasAttachments).map(m=>({...m,pdfs:null}));
+      setEmails(withAtts);
+      showToast(`${withAtts.length} email${withAtts.length!==1?'s':''} with attachments found`,'success');
     }catch(e){showToast(`Scan failed: ${e.message}`,'error',6000);}
     setScanning(false);
   }
 
   async function addEmailToQueue(msg){
     if(!token)return;
-    for(const att of msg.pdfs){
-      const id=`${msg.id}_${att.id}`;
-      if(queue.find(q=>q.id===id))continue;
-      try{
-        const tok=await getToken(account);setToken(tok);
-        const b64=await getAttachmentB64(tok,msg.id,att.id,msg._mailbox);
-        await markAsRead(tok,msg.id,msg._mailbox);
-        setQueue(q=>[...q,{id,name:att.name,b64,source:msg.subject||msg.from?.emailAddress?.address||'Outlook',status:'pending'}]);
-      }catch(e){showToast(`Could not load ${att.name}: ${e.message}`,'error',5000);}
-    }
+    try{
+      const tok=await getToken(account);setToken(tok);
+      // Fetch attachment list now (deferred from scan)
+      const pdfs=msg.pdfs||await getAttachments(tok,msg.id,msg._mailbox);
+      if(!pdfs.length){showToast('No PDF attachments found in this email','error');return;}
+      for(const att of pdfs){
+        const id=`${msg.id}_${att.id}`;
+        if(queue.find(q=>q.id===id))continue;
+        try{
+          const b64=await getAttachmentB64(tok,msg.id,att.id,msg._mailbox);
+          await markAsRead(tok,msg.id,msg._mailbox);
+          setQueue(q=>[...q,{id,name:att.name,b64,source:msg.subject||msg.from?.emailAddress?.address||'Outlook',status:'pending'}]);
+        }catch(e){showToast(`Could not load ${att.name}: ${e.message}`,'error',5000);}
+      }
+    }catch(e){showToast(`Could not load attachments: ${e.message}`,'error',5000);}
   }
 
   async function addCheckedToQueue(){
@@ -1191,7 +1236,10 @@ function App(){
     const pending=queue.filter(x=>x.status==='pending');
     if(!pending.length)return;
     setProcessing(true);
-    for(const item of pending)await extractItem(item);
+    for(let i=0;i<pending.length;i++){
+      if(i>0)await new Promise(r=>setTimeout(r,4000)); // 4s between docs to stay under 30k tok/min
+      await extractItem(pending[i]);
+    }
     setProcessing(false);
     showToast(`Processed ${pending.length} document${pending.length!==1?'s':''}`,'success');
   }
@@ -1219,7 +1267,28 @@ function App(){
     const sum=lines.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);
     return Math.abs(sum-total)<=0.05&&(r.overallConfidence||0)>=0.5;
   });
+  const skipped=reviewed.filter(item=>{const r=results[item.id];return r.docType==='other'||r.docType==='statement';}).length;
+  const usdBlocked=reviewed.filter(item=>results[item.id]?.currency==='USD').length;
+  const balanceBlocked=reviewed.filter(item=>{
+    const r=results[item.id];
+    if(r.docType==='other'||r.docType==='statement'||r.currency==='USD')return false;
+    const isCC=r.docType==='cc_statement';
+    const lines=isCC?(r.transactions||[]):(r.lines||[]);
+    const total=isCC?r.balanceDue:r.invoiceTotal;
+    const sum=lines.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);
+    return Math.abs(sum-total)>0.05;
+  }).length;
   const blocked=reviewed.length-exportable.length;
+
+  async function handleAddCSV(r){
+    if(!token){showToast('Sign in first','error');return;}
+    try{
+      const tok=await getToken(account);setToken(tok);
+      const rows=buildCSV([r]).split('\r\n').slice(1).join('\r\n'); // strip header, keep data rows
+      const path=await appendToOneDrive(tok,rows);
+      showToast(`Added to OneDrive: ${path}`,'success',4000);
+    }catch(e){showToast(`OneDrive error: ${e.message}`,'error',6000);}
+  }
 
   function handleExport(){
     if(!exportable.length)return;
@@ -1239,7 +1308,7 @@ function App(){
         <div className="app-logo">Hergott <span>Farm Equipment</span></div>
         <div className="header-divider"/>
         <div className="header-sub">AP Invoice Processor</div>
-        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.4.0 build 20260409.005</div>
+        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.4.0 build 20260409.011</div>
         <div className="header-spacer"/>
         {account?(
           <div className="header-user">
@@ -1285,7 +1354,7 @@ function App(){
                         {checkedEmails.size>0&&(
                           <button className="btn-scan" style={{padding:'3px 10px',fontSize:'11px'}}
                             onClick={addCheckedToQueue}>
-                            Add {checkedEmails.size} to Queue
+                            Add {checkedEmails.size} to Batch
                           </button>
                         )}
                       </div>
@@ -1301,7 +1370,7 @@ function App(){
                               <div className="email-subject">{msg.subject||'(no subject)'}</div>
                               <div className="email-meta">{msg.from?.emailAddress?.name||msg.from?.emailAddress?.address} · {new Date(msg.receivedDateTime).toLocaleDateString('en-CA')}</div>
                             </div>
-                            <span className="email-badge">{msg.pdfs.length} PDF{msg.pdfs.length!==1?'s':''}</span>
+                            <span className="email-badge">📎 PDF</span>
                           </div>
                         ))}
                       </div>
@@ -1329,7 +1398,7 @@ function App(){
           {/* Queue */}
           <div className="queue-wrap">
             <div className="queue-header">
-              <span className="queue-label">Queue ({queue.length})</span>
+              <span className="queue-label">Batch ({queue.length})</span>
               {pendingCount>0&&(
                 <button className="btn-extract-all" onClick={extractAll} disabled={processing}>
                   {processing?<><span className="spin"/>Processing…</>:`Extract ${pendingCount}`}
@@ -1373,14 +1442,17 @@ function App(){
           {reviewed.map(item=>(
             <ReviewCard key={item.id} item={item} result={results[item.id]}
               onUpdate={r=>updateResult(item.id,r)}
-              onRemove={()=>removeItem(item.id)}/>
+              onRemove={()=>removeItem(item.id)}
+              onAddCSV={handleAddCSV}/>
           ))}
 
           {reviewed.length>0&&(
             <div className="export-bar">
               <div className="export-info">
                 <strong>{exportable.length}</strong> ready to export
-                {blocked>0&&<span className="blocked"> · {blocked} blocked (fix GL balance)</span>}
+                {skipped>0&&<span style={{color:'#888'}}> · {skipped} skipped</span>}
+                {usdBlocked>0&&<span className="blocked"> · {usdBlocked} USD (convert first)</span>}
+                {balanceBlocked>0&&<span className="blocked"> · {balanceBlocked} unbalanced (fix GL)</span>}
                 {blocked===0&&<span className="clear"> · All documents balanced</span>}
               </div>
               <button className="btn-export" disabled={exportable.length===0} onClick={handleExport}>
