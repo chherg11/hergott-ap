@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Hergott AP Invoice Processor — v0.4.0 build 20260409.011
+<!-- Hergott AP Invoice Processor — v0.4.0 build 20260409.013
      v0.1.0  2026-04-02  Initial working release
      v0.2.0  2026-04-09  Fix GL dropdown; PO Number field; CSV export
      v0.3.0  2026-04-09  Azure Function proxy; hardcoded credentials
@@ -16,7 +16,7 @@
      v0.4.0 build 20260409.008  Graph API sequential attachment listing (300ms gap); use /$value for downloads
      v0.4.0 build 20260409.009  Scan deferred — show all emails instantly (1 API call), fetch PDFs only on Add to Batch
      v0.4.0 build 20260409.010  Queue → Batch rename; per-document "+ Add to CSV" button; OneDrive daily file; Files.ReadWrite scope
-     v0.4.0 build 20260409.011  SharePoint CSV: writes to hergottfarmequipment.sharepoint.com/Documents/AP Batches/ (shared, requires Sites.ReadWrite.All + admin consent in Azure)
+     v0.4.0 build 20260409.013  Remove bulk Export to IntelliDealer button — use per-document Add to CSV buttons only
 -->
 <html lang="en">
 <head>
@@ -744,7 +744,10 @@ For cc_statement:
       const d=await res.json();
       const raw=(d.content||[]).map(c=>c.text||'').join('').trim();
       const clean=raw.replace(/^```json\s*/,'').replace(/\s*```$/,'').trim();
-      return JSON.parse(clean);
+      const parsed=JSON.parse(clean);
+      // Always blank PO number — user confirmed they never want this pulled from invoices
+      if(parsed.poNumber!==undefined)parsed.poNumber='';
+      return parsed;
     }catch(e){lastErr=e;}
   }
   throw lastErr;
@@ -842,11 +845,15 @@ function pct(c){return Math.round((c||0)*100)+'%';}
 function USDConversionBanner({r,onUpdate}){
   const [rate,setRate]=React.useState(r._usdRate||'');
   const [fee,setFee]=React.useState(r._usdFee||'0');
+  const [feeType,setFeeType]=React.useState(r._usdFeeType||'$'); // '$' or '%'
   const [fetching,setFetching]=React.useState(false);
   const [fetchErr,setFetchErr]=React.useState('');
 
   const usdTotal=r._usdOriginal||r.invoiceTotal||0;
-  const cadTotal=rate?(parseFloat(usdTotal)*parseFloat(rate)+parseFloat(fee||0)).toFixed(2):'';
+  const feeAmount=feeType==='%'
+    ?parseFloat(usdTotal)*parseFloat(rate||0)*(parseFloat(fee||0)/100)
+    :parseFloat(fee||0);
+  const cadTotal=rate?(parseFloat(usdTotal)*parseFloat(rate)+feeAmount).toFixed(2):'';
 
   async function fetchRate(){
     setFetching(true);setFetchErr('');
@@ -878,8 +885,8 @@ function USDConversionBanner({r,onUpdate}){
       const ratio=parseFloat(l.amount)/(usdTotal);
       return {...l,amount:parseFloat((ratio*(parseFloat(cadTotal))).toFixed(2))};
     });
-    onUpdate({...r,invoiceTotal:parseFloat(cadTotal),lines:newLines,currency:'CAD',_usdRate:rate,_usdFee:fee,_usdOriginal:usdTotal,
-      warnings:(r.warnings||[]).filter(w=>!w.includes('USD INVOICE')).concat([`Converted from USD $${usdTotal} @ ${rate} + $${fee} fee = CAD $${cadTotal}`])});
+    onUpdate({...r,invoiceTotal:parseFloat(cadTotal),lines:newLines,currency:'CAD',_usdRate:rate,_usdFee:fee,_usdFeeType:feeType,_usdOriginal:usdTotal,
+      warnings:(r.warnings||[]).filter(w=>!w.includes('USD INVOICE')).concat([`Converted from USD $${usdTotal} @ ${rate} + ${feeType==='%'?fee+'%':'$'+fee} fee = CAD $${cadTotal}`])});
   }
 
   return(
@@ -892,8 +899,10 @@ function USDConversionBanner({r,onUpdate}){
         <button className="usd-btn" onClick={fetchRate} disabled={fetching}>{fetching?'Fetching…':'Get Rate'}</button>
       </div>
       <div className="usd-row">
-        <span className="usd-label">Bank exchange fee ($):</span>
-        <input className="usd-input" value={fee} onChange={e=>setFee(e.target.value)} placeholder="0.00"/>
+        <span className="usd-label">Bank exchange fee:</span>
+        <input className="usd-input" value={fee} onChange={e=>setFee(e.target.value)} placeholder="0"/>
+        <button className="usd-btn" style={{background:feeType==='$'?'#1B3D2B':'#888',padding:'4px 8px'}} onClick={()=>setFeeType('$')}>$</button>
+        <button className="usd-btn" style={{background:feeType==='%'?'#1B3D2B':'#888',padding:'4px 8px'}} onClick={()=>setFeeType('%')}>%</button>
       </div>
       {fetchErr&&<div style={{fontSize:11,color:'#B00',marginTop:4}}>{fetchErr}</div>}
       {cadTotal&&<div className="usd-converted">→ CAD Total: ${cadTotal}</div>}
@@ -940,6 +949,7 @@ function ReviewCard({item,result,onUpdate,onRemove,onAddCSV}){
       <div className="rc-head">
         <span className={`rc-doctype ${typeCls}`}>{typeLabel}</span>
         <span className="rc-filename">{item.name}</span>
+        {item.source&&<span style={{fontSize:'10px',color:'#AAA',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:180,flexShrink:1}} title={item.source}>{item.source}</span>}
         <span className={`rc-conf ${confCls(oc)}`}>{pct(oc)}</span>
         {item.b64&&<button className="btn-rc-remove" style={{marginRight:'4px',background:'#1B3D2B',color:'#fff',fontSize:'10px',padding:'2px 8px',borderRadius:'3px',border:'none',cursor:'pointer'}} onClick={()=>{const u=URL.createObjectURL(new Blob([Uint8Array.from(atob(item.b64),c=>c.charCodeAt(0))],{type:'application/pdf'}));window.open(u,'_blank');}}>PDF</button>}<button className="btn-rc-remove" onClick={onRemove}>×</button>
       </div>
@@ -949,7 +959,13 @@ function ReviewCard({item,result,onUpdate,onRemove,onAddCSV}){
         <div style={{padding:'10px 14px'}}>
           {r.warnings&&r.warnings.map((w,i)=><div key={i} style={{fontSize:'12px',color:'#7A5A00',background:'#FFFBF0',border:'1px solid #F5E27A',borderRadius:'4px',padding:'7px 10px',marginBottom:6}}>⚠ {w}</div>)}
           {r.notes&&<div style={{fontSize:'11px',color:'#1B5E35',background:'#EAF4F0',border:'1px solid #A8D5BC',borderRadius:'4px',padding:'7px 10px',marginTop:4}}>{r.notes}</div>}
-          <div style={{fontSize:'11px',color:'#999',marginTop:8,textAlign:'right'}}>Not exported — remove from queue when done reviewing</div>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:10}}>
+            <span style={{fontSize:'11px',color:'#999'}}>Not exported — remove when done reviewing</span>
+            <button onClick={()=>onUpdate({...r,docType:'supplier_invoice',warnings:[],notes:'Manually overridden from '+r.docType})}
+              style={{fontSize:'11px',padding:'3px 10px',background:'#5C4A1E',color:'#fff',border:'none',borderRadius:'4px',cursor:'pointer',fontWeight:600}}>
+              Override — Process as Invoice
+            </button>
+          </div>
         </div>
       )}
 
@@ -1315,7 +1331,7 @@ function App(){
         <div className="app-logo">Hergott <span>Farm Equipment</span></div>
         <div className="header-divider"/>
         <div className="header-sub">AP Invoice Processor</div>
-        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.4.0 build 20260409.011</div>
+        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.4.0 build 20260409.013</div>
         <div className="header-spacer"/>
         {account?(
           <div className="header-user">
@@ -1456,15 +1472,12 @@ function App(){
           {reviewed.length>0&&(
             <div className="export-bar">
               <div className="export-info">
-                <strong>{exportable.length}</strong> ready to export
+                <strong>{exportable.length}</strong> ready to add to CSV
                 {skipped>0&&<span style={{color:'#888'}}> · {skipped} skipped</span>}
                 {usdBlocked>0&&<span className="blocked"> · {usdBlocked} USD (convert first)</span>}
                 {balanceBlocked>0&&<span className="blocked"> · {balanceBlocked} unbalanced (fix GL)</span>}
                 {blocked===0&&<span className="clear"> · All documents balanced</span>}
               </div>
-              <button className="btn-export" disabled={exportable.length===0} onClick={handleExport}>
-                Export to IntelliDealer
-              </button>
             </div>
           )}
         </div>
