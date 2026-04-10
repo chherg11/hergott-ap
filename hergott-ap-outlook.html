@@ -591,7 +591,7 @@ async function getMailFolders(tok){
   return d.value||[];
 }
 async function getUnreadEmails(tok,folderId='inbox'){
-  const url=`/me/mailFolders/${folderId}/messages?$filter=isRead eq false&$select=id,subject,from,receivedDateTime&$top=50`;
+  const url=`/me/mailFolders/${folderId}/messages?$filter=isRead eq false&$select=id,subject,from,receivedDateTime,hasAttachments&$top=50`;
   const d=await gGet(url,tok);
   return d.value||[];
 }
@@ -1076,12 +1076,12 @@ function App(){
     try{
       const tok=await getToken(config,account);setToken(tok);
       const msgs=await getUnreadEmails(tok,folderId);
-      const enriched=msgs.map(m=>{
-        const pdfs=(m.attachments||[]).filter(a=>
-          a.contentType==='application/pdf'||a.name?.toLowerCase().endsWith('.pdf')
-        );
-        return{...m,pdfs};
-      });
+      const enriched=await Promise.all(
+        msgs.filter(m=>m.hasAttachments).map(async m=>{
+          try{const a=await getAttachments(tok,m.id,m._mailbox);return{...m,pdfs:a};}
+          catch{return{...m,pdfs:[]};}
+        })
+      );
       const withPdfs=enriched.filter(m=>m.pdfs.length>0);
       setEmails(withPdfs);
       showToast(`${withPdfs.length} email${withPdfs.length!==1?'s':''} with PDFs found`,'success');
