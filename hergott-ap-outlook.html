@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Hergott AP Invoice Processor — v0.4.0 build 20260410.004
+<!-- Hergott AP Invoice Processor — v0.4.0 build 20260410.005
      v0.1.0  2026-04-02  Initial working release
      v0.2.0  2026-04-09  Fix GL dropdown; PO Number field; CSV export
      v0.3.0  2026-04-09  Azure Function proxy; hardcoded credentials
@@ -1283,22 +1283,30 @@ function App(){
       // Fetch attachment list now (deferred from scan)
       const pdfs=msg.pdfs||await getAttachments(tok,msg.id,msg._mailbox);
       if(!pdfs.length){showToast('No PDF attachments found in this email','error');return;}
+      let loaded=false;
       for(const att of pdfs){
         const id=`${msg.id}_${att.id}`;
-        if(queue.find(q=>q.id===id))continue;
+        if(queue.find(q=>q.id===id)){loaded=true;continue;}
         try{
           const b64=await getAttachmentB64(tok,msg.id,att.id,msg._mailbox);
           await markAsRead(tok,msg.id,msg._mailbox);
           setQueue(q=>[...q,{id,name:att.name,b64,source:msg.subject||msg.from?.emailAddress?.address||'Outlook',status:'pending'}]);
+          loaded=true;
         }catch(e){showToast(`Could not load ${att.name}: ${e.message}`,'error',5000);}
       }
-    }catch(e){showToast(`Could not load attachments: ${e.message}`,'error',5000);}
+      return loaded;
+    }catch(e){showToast(`Could not load attachments: ${e.message}`,'error',5000);return false;}
   }
 
   async function addCheckedToQueue(){
     const toAdd=emails.filter(m=>checkedEmails.has(m.id));
     if(!toAdd.length)return;
-    for(const msg of toAdd)await addEmailToQueue(msg);
+    const succeeded=new Set();
+    for(const msg of toAdd){
+      const ok=await addEmailToQueue(msg);
+      if(ok)succeeded.add(msg.id);
+    }
+    setEmails(prev=>prev.filter(m=>!succeeded.has(m.id)));
     setCheckedEmails(new Set());
   }
 
@@ -1427,7 +1435,7 @@ function App(){
         <div className="app-logo">Hergott <span>Farm Equipment</span></div>
         <div className="header-divider"/>
         <div className="header-sub">AP Invoice Processor</div>
-        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.4.0 build 20260410.004</div>
+        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.4.0 build 20260410.005</div>
         <div className="header-spacer"/>
         {account?(
           <div className="header-user">
