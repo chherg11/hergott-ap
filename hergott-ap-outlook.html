@@ -652,6 +652,7 @@ vendorConfidence scale:
 
 STEP 3 — HEADER DATA:
 Invoices: extract invoice number, invoice date (YYYYMMDD), due date (YYYYMMDD — net 30 from invoice date if not stated).
+PO Number: look for any "PO #", "Purchase Order #", "Order #", "P.O.", or "Reference #" on the invoice. Extract the number as poNumber. If not found, leave blank.
 CC statements: extract statement date, period start, period end (all YYYYMMDD), balance due, minimum payment.
 payableAcct: "20040" ONLY for CASE, CASEU, or 93724 — "20000" for all other vendors.
 
@@ -672,7 +673,7 @@ GST should be ~5% of net. Flag anomalies in warnings array.
 RETURN ONLY VALID JSON. No markdown, no explanation before or after.
 
 For supplier_invoice or payroll_remittance:
-{"docType":"supplier_invoice","vendorCode":"","vendorName":"","vendorConfidence":0.0,"invoiceNumber":"","invoiceDate":"YYYYMMDD","dueDate":"YYYYMMDD","payableAcct":"20000","invoiceTotal":0.00,"lines":[{"description":"","amount":0.00,"glAcct":"00000","glName":"","costCentre":"","cgCode":"","stockNum":"","confidence":0.0}],"warnings":[],"overallConfidence":0.0,"notes":""}
+{"docType":"supplier_invoice","vendorCode":"","vendorName":"","vendorConfidence":0.0,"invoiceNumber":"","poNumber":"","invoiceDate":"YYYYMMDD","dueDate":"YYYYMMDD","payableAcct":"20000","invoiceTotal":0.00,"lines":[{"description":"","amount":0.00,"glAcct":"00000","glName":"","costCentre":"","cgCode":"","stockNum":"","confidence":0.0}],"warnings":[],"overallConfidence":0.0,"notes":""}
 
 For cc_statement:
 {"docType":"cc_statement","vendorCode":"97392","vendorName":"SCOTIABANK - VISA BOX 4100","vendorConfidence":1.0,"statementDate":"YYYYMMDD","periodStart":"YYYYMMDD","periodEnd":"YYYYMMDD","balanceDue":0.00,"minimumPayment":0.00,"transactions":[{"date":"YYYYMMDD","description":"","amount":0.00,"glAcct":"00000","glName":"","confidence":0.0}],"warnings":[],"overallConfidence":0.0,"notes":""}`;
@@ -736,7 +737,7 @@ function buildCSV(results){
       const glCC=isCC?'':(line.costCentre||'');
       rows.push([
         rid,'01',fv(vendor),'01',fv(total),'',fv(invNum),'','10200','',
-        fv(payable),'','582000','','',fv(purDate),fv(dueDate),
+        fv(payable),'','582000',fv(r.poNumber||''),'',fv(purDate),fv(dueDate),
         fv(line.amount),fv(glCC),fv(line.glAcct),
         fv(line.cgCode||''),fv(line.stockNum||''),fv(line.description),''
       ].join(','));
@@ -878,7 +879,7 @@ function ReviewCard({item,result,onUpdate,onRemove}){
 
       <div className="rc-body">
         {/* Header fields */}
-        <div className="rc-fields" style={{gridTemplateColumns:isCC?'2fr 1fr 1fr 1fr':'2fr 1fr 1fr 1fr 1fr'}}>
+        <div className="rc-fields" style={{gridTemplateColumns:isCC?'2fr 1fr 1fr 1fr':'2fr 1fr 1fr 1fr 1fr 1fr'}}>
           {/* Vendor */}
           <div className="rc-field">
             <div className="rc-field-label">Vendor</div>
@@ -910,6 +911,11 @@ function ReviewCard({item,result,onUpdate,onRemove}){
               <div className="rc-field-label">Due Date</div>
               <input className="rc-input" value={r.dueDate||''} placeholder="YYYYMMDD"
                 onChange={e=>upField('dueDate',e.target.value)}/>
+            </div>
+            <div className="rc-field">
+              <div className="rc-field-label">PO Number</div>
+              <input className="rc-input" value={r.poNumber||''} placeholder="—"
+                onChange={e=>upField('poNumber',e.target.value)}/>
             </div>
             <div className="rc-field">
               <div className="rc-field-label">Payable Acct</div>
@@ -971,8 +977,9 @@ function ReviewCard({item,result,onUpdate,onRemove}){
                   <select className="td-select" value={line.glAcct||''}
                     onChange={e=>{
                       const gl=GL_ACCOUNTS.find(g=>g.c===e.target.value);
-                      upLine(idx,'glAcct',e.target.value);
-                      if(gl)upLine(idx,'glName',gl.n);
+                      const ls=[...lines];
+                      ls[idx]={...ls[idx],glAcct:e.target.value,...(gl?{glName:gl.n}:{})};
+                      onUpdate({...r,[isCC?'transactions':'lines']:ls});
                     }}>
                     {GL_ACCOUNTS.map(g=><option key={g.c} value={g.c}>{g.c} {g.n}</option>)}
                     {line.glAcct&&!GL_ACCOUNTS.find(g=>g.c===line.glAcct)&&
