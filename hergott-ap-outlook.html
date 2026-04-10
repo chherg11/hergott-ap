@@ -1032,7 +1032,7 @@ function App(){
   const[account,setAccount]=useState(null);
   const[token,setToken]=useState(null);
   const[folders,setFolders]=useState([]);
-  const[folderId,setFolderId]=useState('inbox');
+  const AP_FOLDER_ID='AAMkADAwY2RiOGIwLTNkNWEtNDNlNC04ZGZjLTQwMGY1MDg1Mjk4NAAuAAAAAAAHDVOfDT4oSIruQk434m3wAQAMceb0LHNsQIeZ8oOH-9q0AAStSKcvAAA=';const[folderId,setFolderId]=useState(AP_FOLDER_ID);
   const[emails,setEmails]=useState([]);
   const[scanning,setScanning]=useState(false);
   const[queue,setQueue]=useState([]);
@@ -1206,7 +1206,7 @@ function App(){
                 <div className="no-emails">Sign in to scan your Outlook inbox</div>
               ):(
                 <>
-                  <div className="folder-row"><span style={{flex:1,fontSize:'11px',color:'#888',alignSelf:'center',fontStyle:'italic'}}>accounts payable inbox</span><button className="btn-scan" onClick={handleScan} disabled={scanning}>{scanning?<><span className="spin"/>Scanning</>:'Scan Now'}</button></div>
+                  <div className="folder-row"><span style={{flex:1,fontSize:'11px',color:'#888',alignSelf:'center',fontStyle:'italic'}}>AP mailbox</span><button className="btn-scan" onClick={handleScan} disabled={scanning}>{scanning?<><span className="spin"/>Scanning</>:'Scan Now'}</button></div>
                   {emails.length===0&&!scanning&&(
                     <div className="no-emails">No unread emails with PDF attachments</div>
                   )}
