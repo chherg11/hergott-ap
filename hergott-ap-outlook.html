@@ -1,11 +1,12 @@
 <!DOCTYPE html>
-<!-- Hergott AP Invoice Processor — v0.3.0 build 20260409.003
-     v0.1.0  2026-04-02  Initial working release (MSAL + Outlook scan + Claude extraction + IntelliDealer CSV)
-     v0.2.0  2026-04-09  Fix GL account dropdown reverting on change; add PO Number extraction, UI field, and CSV export
-     v0.3.0  2026-04-09  Azure Function proxy — no setup screen, no keys in browser; MSAL client ID/tenant hardcoded
-     build 20260409.001  Anonymous proxy auth; no function key in source
-     build 20260409.002  Export filename includes time (HHMM) — unique per export, no overwrite in Downloads
-     build 20260409.003  Prompt: PO extraction targets Customer PO # specifically (not Order # or vendor reference); 14000 vendor rule made explicit
+<!-- Hergott AP Invoice Processor — v0.4.0 build 20260409.001
+     v0.1.0  2026-04-02  Initial working release
+     v0.2.0  2026-04-09  Fix GL dropdown; PO Number field; CSV export
+     v0.3.0  2026-04-09  Azure Function proxy; hardcoded credentials
+     build 20260409.001  Anonymous proxy auth
+     build 20260409.002  Export filename includes HHMM timestamp
+     build 20260409.003  Prompt: Customer PO # rule; 14000 vendor rule explicit
+     v0.4.0  2026-04-09  Doc type detection (skip/credit/statement); USD conversion (BoC rate + fee); payment terms (BN30, 30th of month, due on receipt); departmental account warnings; MISC vendor flag; VRC/Golden West/Colony rules; CGC field per GL line
 -->
 <html lang="en">
 <head>
@@ -130,9 +131,18 @@ body{font-family:'DM Sans',sans-serif;background:#E8E5DF;color:#1A1A18;font-size
 .rc-head{padding:11px 14px;background:#F5F3EF;border-bottom:1px solid #E6E3DE;display:flex;align-items:center;gap:9px}
 .rc-doctype{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.07em;padding:2px 8px;border-radius:10px;white-space:nowrap;flex-shrink:0}
 .rc-doctype.invoice{background:#D4EDDA;color:#1B5E35}
+.rc-doctype.credit{background:#FADADD;color:#7B1C2A}
 .rc-doctype.cc{background:#D1ECF1;color:#0B525F}
 .rc-doctype.payroll{background:#FDEBD0;color:#6E3200}
+.rc-doctype.statement{background:#FFF3CD;color:#856404}
 .rc-doctype.other{background:#E8E3FC;color:#3B1F7A}
+.usd-banner{background:#FFF3CD;border:1.5px solid #F0C040;border-radius:6px;padding:10px 14px;margin:8px 0;font-size:12px;color:#6B4C00}
+.usd-banner strong{display:block;margin-bottom:6px;font-size:13px}
+.usd-row{display:flex;gap:8px;align-items:center;margin-top:6px}
+.usd-label{font-size:11px;color:#6B4C00;white-space:nowrap}
+.usd-input{padding:4px 7px;border:1.5px solid #D0A830;border-radius:4px;font-size:12px;font-family:'DM Mono',monospace;width:100px;background:#FFFEF8}
+.usd-btn{padding:4px 10px;background:#1B3D2B;color:#fff;border:none;border-radius:4px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap}
+.usd-converted{font-size:11px;color:#1B5E35;font-weight:700;margin-top:4px}
 .rc-filename{font-family:'DM Mono',monospace;font-size:11px;color:#999;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rc-conf{padding:3px 9px;border-radius:11px;font-size:11px;font-weight:700;white-space:nowrap;flex-shrink:0}
 .rc-conf.high{background:#D4EDDA;color:#1B5E35}
@@ -626,10 +636,18 @@ async function extractDoc(b64,name){
 
 STEP 1 — IDENTIFY DOCUMENT TYPE:
 Classify as one of:
-- "supplier_invoice" — A vendor invoice for goods or services purchased by Hergott
-- "cc_statement" — A Scotiabank Visa credit card statement (lists individual card transactions)
-- "payroll_remittance" — CRA payroll remittance advice to Receiver General
-- "other" — Describe in notes
+- "supplier_invoice" — A vendor invoice for goods or services owed by Hergott
+- "credit_memo" — A vendor credit memo (reduces what Hergott owes — negative amounts)
+- "cc_statement" — Scotiabank Visa credit card statement
+- "payroll_remittance" — CRA payroll remittance
+- "statement" — A monthly account statement (NOT an invoice — shows balance, previous charges)
+- "other" — Order confirmations, parts confirmations, payment receipts, or anything not payable
+
+CRITICAL docType rules — check BEFORE proceeding:
+- If document says "DO NOT PAY", "INVOICE TO FOLLOW", "Parts Confirmation", "Order Acknowledgment", "Order Confirmation" → docType="other", add warning "Order confirmation only — do not process"
+- If document shows "Balance Due: $0.00" or "Amount Due: $0.00" with a payment already applied → docType="other", add warning "Payment receipt — balance $0 — do not process"
+- If document is titled "Statement" or "Account Statement" and shows aging/previous balance rather than a single invoice → docType="statement", add warning "Monthly statement — verify matching invoices already posted before processing"
+- If document is titled "Credit Memo" or "Credit Note" → docType="credit_memo" — invoiceTotal and ALL GL amounts must be NEGATIVE
 
 STEP 2 — VENDOR IDENTIFICATION:
 Search for the vendor's name, address, phone number, or account references. Match to this IntelliDealer vendor master:
@@ -640,34 +658,57 @@ vendorConfidence scale:
 - 0.85–0.99 = very likely (recognized company, minor variation)
 - 0.65–0.84 = probable match
 - below 0.65 = uncertain — flag it
+- If NO match found → vendorCode="MISC", vendorConfidence=0.40, add warning "Vendor not in master list — verify and update before posting"
 
 STEP 3 — HEADER DATA:
-Invoices: extract invoice number, invoice date (YYYYMMDD), due date (YYYYMMDD — net 30 from invoice date if not stated).
-PO Number: Look specifically for a field labelled "Customer PO #", "Customer PO", "PO #", "Purchase Order #", or "P.O." on the invoice — this is YOUR customer's internal PO reference and may contain names, codes, or descriptions (e.g. "JeanTremel/JP"). Extract it exactly as printed. Do NOT use "Order #", "Original Order #", "Shipment #", "Reference #", or vendor-assigned numbers — those are NOT the customer PO. If no customer PO field is found, leave blank.
-CC statements: extract statement date, period start, period end (all YYYYMMDD), balance due, minimum payment.
-payableAcct: "20040" ONLY for CASE, CASEU, or 93724 — "20000" for all other vendors.
+PO Number: Look ONLY for a field explicitly labelled "Customer PO #", "Customer PO", "PO #", "Purchase Order #", or "P.O." — this is Hergott's internal reference, may contain names or codes (e.g. "JeanTremel/JP", "313BTT"). Extract exactly as printed. Do NOT use "Order #", "Original Order #", "Shipment #", "Reference #", or any vendor-assigned numbers. Leave blank if not found.
+payableAcct: "20040" ONLY for CASE, CASEU, or 93724 — "20000" for all others.
+Currency: check if invoice is in USD. If USD → set currency="USD", add warning "USD INVOICE — convert to CAD before posting"
+
+PAYMENT TERMS — calculate dueDate precisely:
+- "Net 30" or no terms stated → dueDate = invoiceDate + 30 days
+- "Due Upon Receipt" / "Due on Receipt" / "Due Immediately" → dueDate = invoiceDate
+- "30th of the following month" → dueDate = last day of the month AFTER invoice month (e.g. invoice Apr 7 → due May 31)
+- "BN30" or "BN30 Net 30" → dueDate = last day of invoice month + 30 days (e.g. invoice Apr 7 → Apr 30 + 30 = May 30)
+- "2/10 Net 30" → use Net 30 date
+- All dates in YYYYMMDD format
 
 STEP 4 — GL CODING (apply precisely):
 ${GL_RULES}
 
+DEPARTMENTAL ACCOUNTS — these accounts are used across multiple profit centres (departments). When coding to one of these, add a warning: "Departmental account — append profit centre if required: 0=Admin 1=Sales 3=Parts 4=Service 6=Trucking":
+00400 TRAVEL, 00460 MEALS & ENTERTAINMENT, 00500 TRAINING, 00600 PROMOTION, 00601 ADVERTISING, 00602 SPONSORSHIPS, 00700 DEMONSTRATIONS, 00800 AFTER SALES EXPENSE, 01100 PARTS FREIGHT HANDLING, 01400 SHOP SUPP & TOOL REPAIRS, 01500 TRUCK EXPENSE, 01402 BOOT & SAFETY GEAR, 02000 OFFICE SUPPLIES, 02370 VACATION & HOLIDAY PAY, 04500 COMPUTER SERVICES, 04600 MEALS & ENTERTAINMENT
+
+VENDOR-SPECIFIC RULES:
+- VitalEdge / VitalECM / VRC / Vital Records Control → vendorCode="97387", GL 04500 COMPUTER SERVICES
+- Westward Parts → always 14001, never 14000
+- Golden West Broadcasting / BOLT 107.5 / DiscoverHumboldt → GL 00601 ADVERTISING + departmental warning
+- Rawlco Radio → GL 00601 ADVERTISING + departmental warning
+- Colony Chevrolet / any vehicle dealer → GL 01500 TRUCK EXPENSE
+- Canadian Energy / CDN Energy → vendorCode="MISC"
+- Ag Express Electronics → vendorCode="MISC"; if USD set currency="USD"
+
 Rules for every invoice:
-- Extract GST (5%) as a SEPARATE GL line to 21450 if shown. Do not fold into other lines.
+- Extract GST (5%) as a SEPARATE GL line to 21450 if shown.
 - Extract PST (6% SK) as a SEPARATE GL line to 21400 if shown.
-- For CC statements: code EVERY individual transaction — do not group or skip any.
-- Floor plan interest (GL 00900) ALWAYS gets costCentre = "1".
-- Do not default to 04000 when a more specific code clearly applies.
+- For CC statements: code EVERY individual transaction.
+- Floor plan interest (GL 00900) ALWAYS gets costCentre="1".
+- Do not default to 04000 when a more specific code applies.
+- For credit_memo: ALL amounts including GL lines must be negative numbers.
 
 STEP 5 — VALIDATE:
-Sum all GL line amounts. Must equal invoice total within $0.05.
-GST should be ~5% of net. Flag anomalies in warnings array.
+Sum all GL line amounts. Must equal invoiceTotal within $0.05. Flag anomalies in warnings.
 
-RETURN ONLY VALID JSON. No markdown, no explanation before or after.
+RETURN ONLY VALID JSON. No markdown, no explanation.
 
-For supplier_invoice or payroll_remittance:
-{"docType":"supplier_invoice","vendorCode":"","vendorName":"","vendorConfidence":0.0,"invoiceNumber":"","poNumber":"","invoiceDate":"YYYYMMDD","dueDate":"YYYYMMDD","payableAcct":"20000","invoiceTotal":0.00,"lines":[{"description":"","amount":0.00,"glAcct":"00000","glName":"","costCentre":"","cgCode":"","stockNum":"","confidence":0.0}],"warnings":[],"overallConfidence":0.0,"notes":""}
+For supplier_invoice, credit_memo, or payroll_remittance:
+{"docType":"supplier_invoice","vendorCode":"","vendorName":"","vendorConfidence":0.0,"invoiceNumber":"","poNumber":"","invoiceDate":"YYYYMMDD","dueDate":"YYYYMMDD","payableAcct":"20000","currency":"CAD","invoiceTotal":0.00,"lines":[{"description":"","amount":0.00,"glAcct":"00000","glName":"","costCentre":"","cgCode":"","stockNum":"","confidence":0.0}],"warnings":[],"overallConfidence":0.0,"notes":""}
+
+For statement or other:
+{"docType":"other","vendorCode":"","vendorName":"","vendorConfidence":0.0,"invoiceNumber":"","invoiceDate":"YYYYMMDD","invoiceTotal":0.00,"currency":"CAD","lines":[],"warnings":["reason"],"overallConfidence":0.0,"notes":""}
 
 For cc_statement:
-{"docType":"cc_statement","vendorCode":"97392","vendorName":"SCOTIABANK - VISA BOX 4100","vendorConfidence":1.0,"statementDate":"YYYYMMDD","periodStart":"YYYYMMDD","periodEnd":"YYYYMMDD","balanceDue":0.00,"minimumPayment":0.00,"transactions":[{"date":"YYYYMMDD","description":"","amount":0.00,"glAcct":"00000","glName":"","confidence":0.0}],"warnings":[],"overallConfidence":0.0,"notes":""}`;
+{"docType":"cc_statement","vendorCode":"97392","vendorName":"SCOTIABANK - VISA BOX 4100","vendorConfidence":1.0,"statementDate":"YYYYMMDD","periodStart":"YYYYMMDD","periodEnd":"YYYYMMDD","balanceDue":0.00,"minimumPayment":0.00,"currency":"CAD","transactions":[{"date":"YYYYMMDD","description":"","amount":0.00,"glAcct":"00000","glName":"","confidence":0.0}],"warnings":[],"overallConfidence":0.0,"notes":""}`;
 
   let lastErr;
   for(let i=0;i<3;i++){
@@ -745,6 +786,72 @@ function confCls(c){return c>=0.85?'high':c>=0.65?'med':'low';}
 function pct(c){return Math.round((c||0)*100)+'%';}
 
 // ── Setup Screen ──────────────────────────────────────────────────────────────
+// ── USD Conversion Banner ─────────────────────────────────────────────────────
+function USDConversionBanner({r,onUpdate}){
+  const [rate,setRate]=React.useState(r._usdRate||'');
+  const [fee,setFee]=React.useState(r._usdFee||'0');
+  const [fetching,setFetching]=React.useState(false);
+  const [fetchErr,setFetchErr]=React.useState('');
+
+  const usdTotal=r._usdOriginal||r.invoiceTotal||0;
+  const cadTotal=rate?(parseFloat(usdTotal)*parseFloat(rate)+parseFloat(fee||0)).toFixed(2):'';
+
+  async function fetchRate(){
+    setFetching(true);setFetchErr('');
+    try{
+      const today=new Date().toISOString().slice(0,10);
+      const res=await fetch(`https://www.bankofcanada.ca/valet/observations/FXUSDCAD/json?start_date=${today}&end_date=${today}`);
+      const d=await res.json();
+      const obs=d.observations;
+      if(obs&&obs.length>0){
+        const r2=parseFloat(obs[obs.length-1].FXUSDCAD.v);
+        setRate(r2.toFixed(4));
+      } else {
+        // Try yesterday if today not available yet
+        const yest=new Date(Date.now()-86400000).toISOString().slice(0,10);
+        const res2=await fetch(`https://www.bankofcanada.ca/valet/observations/FXUSDCAD/json?start_date=${yest}&end_date=${yest}`);
+        const d2=await res2.json();
+        const obs2=d2.observations;
+        if(obs2&&obs2.length>0)setRate(parseFloat(obs2[obs2.length-1].FXUSDCAD.v).toFixed(4));
+        else setFetchErr('Rate not available — enter manually');
+      }
+    }catch(e){setFetchErr('Could not fetch rate — enter manually');}
+    setFetching(false);
+  }
+
+  function applyConversion(){
+    if(!rate||!cadTotal)return;
+    const newLines=(r.lines||[]).map(l=>{
+      if(l.glAcct==='21450'||l.glAcct==='21400')return l; // keep tax lines as-is (USD invoice has no CA tax)
+      const ratio=parseFloat(l.amount)/(usdTotal);
+      return {...l,amount:parseFloat((ratio*(parseFloat(cadTotal))).toFixed(2))};
+    });
+    onUpdate({...r,invoiceTotal:parseFloat(cadTotal),lines:newLines,currency:'CAD',_usdRate:rate,_usdFee:fee,_usdOriginal:usdTotal,
+      warnings:(r.warnings||[]).filter(w=>!w.includes('USD INVOICE')).concat([`Converted from USD $${usdTotal} @ ${rate} + $${fee} fee = CAD $${cadTotal}`])});
+  }
+
+  return(
+    <div className="usd-banner">
+      <strong>⚠ USD Invoice — Convert to CAD before export</strong>
+      <div style={{fontSize:11,marginBottom:6}}>USD Amount: <strong>${usdTotal}</strong></div>
+      <div className="usd-row">
+        <span className="usd-label">Exchange rate (USD→CAD):</span>
+        <input className="usd-input" value={rate} onChange={e=>setRate(e.target.value)} placeholder="e.g. 1.3850"/>
+        <button className="usd-btn" onClick={fetchRate} disabled={fetching}>{fetching?'Fetching…':'Get Rate'}</button>
+      </div>
+      <div className="usd-row">
+        <span className="usd-label">Bank exchange fee ($):</span>
+        <input className="usd-input" value={fee} onChange={e=>setFee(e.target.value)} placeholder="0.00"/>
+      </div>
+      {fetchErr&&<div style={{fontSize:11,color:'#B00',marginTop:4}}>{fetchErr}</div>}
+      {cadTotal&&<div className="usd-converted">→ CAD Total: ${cadTotal}</div>}
+      {cadTotal&&<div className="usd-row" style={{marginTop:8}}>
+        <button className="usd-btn" onClick={applyConversion}>Apply Conversion & Unlock Export</button>
+      </div>}
+    </div>
+  );
+}
+
 // ── Review Card ───────────────────────────────────────────────────────────────
 function ReviewCard({item,result,onUpdate,onRemove}){
   const r=result;
@@ -770,8 +877,11 @@ function ReviewCard({item,result,onUpdate,onRemove}){
   }
 
   const oc=r.overallConfidence||0;
-  const typeLabel=isCC?'CC Statement':r.docType==='payroll_remittance'?'Payroll':r.docType==='other'?'Other':'Invoice';
-  const typeCls=isCC?'cc':r.docType==='payroll_remittance'?'payroll':r.docType==='other'?'other':'invoice';
+  const isUSD=r.currency==='USD';
+  const isCreditMemo=r.docType==='credit_memo';
+  const isSkip=r.docType==='other'||r.docType==='statement';
+  const typeLabel=isCC?'CC Statement':isCreditMemo?'Credit Memo':r.docType==='payroll_remittance'?'Payroll':r.docType==='statement'?'Statement':r.docType==='other'?'Skip':'Invoice';
+  const typeCls=isCC?'cc':isCreditMemo?'credit':r.docType==='payroll_remittance'?'payroll':r.docType==='statement'?'statement':r.docType==='other'?'other':'invoice';
 
   return(
     <div className="review-card">
@@ -783,6 +893,8 @@ function ReviewCard({item,result,onUpdate,onRemove}){
       </div>
 
       <div className="rc-body">
+        {/* USD conversion banner */}
+        {isUSD&&<USDConversionBanner r={r} onUpdate={onUpdate}/>}
         {/* Header fields */}
         <div className="rc-fields" style={{gridTemplateColumns:isCC?'2fr 1fr 1fr 1fr':'2fr 1fr 1fr 1fr 1fr 1fr'}}>
           {/* Vendor */}
@@ -864,6 +976,7 @@ function ReviewCard({item,result,onUpdate,onRemove}){
               <th style={{width:180}}>GL Account</th>
               <th className="r" style={{width:76}}>Amount</th>
               {!isCC&&<th style={{width:34}} title="Cost Centre">CC</th>}
+              {!isCC&&<th style={{width:36}} title="Complete Goods Code">CGC</th>}
               {!isCC&&<th style={{width:70}} title="Stock #">Stock #</th>}
               <th style={{width:38,textAlign:'center'}}>Conf</th>
               <th style={{width:22}}></th>
@@ -899,6 +1012,9 @@ function ReviewCard({item,result,onUpdate,onRemove}){
                 {!isCC&&<td>
                   <input className="td-input" style={{width:30}} value={line.costCentre||''} placeholder="—"
                     onChange={e=>upLine(idx,'costCentre',e.target.value)}/>
+                </td>}{!isCC&&<td>
+                  <input className="td-input" style={{width:34}} value={line.cgCode||''} placeholder="—"
+                    onChange={e=>upLine(idx,'cgCode',e.target.value)}/>
                 </td>}{!isCC&&<td><input className="td-input" style={{width:70}} value={line.stockNum||''} placeholder="—"
                     onChange={e=>upLine(idx,'stockNum',e.target.value)}/>
                 </td>}
@@ -1064,6 +1180,8 @@ function App(){
   const reviewed=queue.filter(x=>x.status==='done'&&results[x.id]);
   const exportable=reviewed.filter(item=>{
     const r=results[item.id];
+    if(r.docType==='other'||r.docType==='statement')return false;
+    if(r.currency==='USD')return false;
     const isCC=r.docType==='cc_statement';
     const lines=isCC?(r.transactions||[]):(r.lines||[]);
     const total=isCC?r.balanceDue:r.invoiceTotal;
@@ -1090,7 +1208,7 @@ function App(){
         <div className="app-logo">Hergott <span>Farm Equipment</span></div>
         <div className="header-divider"/>
         <div className="header-sub">AP Invoice Processor</div>
-        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.3.0 build 20260409.003</div>
+        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.4.0 build 20260409.001</div>
         <div className="header-spacer"/>
         {account?(
           <div className="header-user">
