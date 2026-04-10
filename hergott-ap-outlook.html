@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Hergott AP Invoice Processor — v0.4.0 build 20260409.014
+<!-- Hergott AP Invoice Processor — v0.4.0 build 20260410.001
      v0.1.0  2026-04-02  Initial working release
      v0.2.0  2026-04-09  Fix GL dropdown; PO Number field; CSV export
      v0.3.0  2026-04-09  Azure Function proxy; hardcoded credentials
@@ -17,6 +17,7 @@
      v0.4.0 build 20260409.009  Scan deferred — show all emails instantly (1 API call), fetch PDFs only on Add to Batch
      v0.4.0 build 20260409.010  Queue → Batch rename; per-document "+ Add to CSV" button; OneDrive daily file; Files.ReadWrite scope
      v0.4.0 build 20260409.014  Colony bill-to vs letterhead rule; decimal input on GL amounts; all amounts display 2dp; remove Export button
+     v0.4.0 build 20260410.001  Fix duplicate Add to CSV: guard + disable button after first add
 -->
 <html lang="en">
 <head>
@@ -238,7 +239,6 @@ const {useState,useEffect,useRef,useCallback}=React;
 const GRAPH='https://graph.microsoft.com/v1.0';
 const MODEL='claude-sonnet-4-20250514';
 
-// ── Vendor list for extraction prompt ────────────────────────────────────────
 const VENDOR_PROMPT=`IntelliDealer Vendor Master — Hergott Farm Equipment Ltd., Humboldt SK
 Match document vendor to the closest code. payableAcct rule: "20040" ONLY for CASE, CASEU, or 93724; "20000" for ALL other vendors.
 
@@ -317,7 +317,6 @@ DEGEL|DEGELMAN INDUSTRIES BOX 830 REGINA SK
 96974|HUMBOLDT HOME HARDWARE HUMBOLDT SK
 MISC|MISC VENDORS (use ONLY if no match — set vendorConfidence below 0.50)`;
 
-// ── GL Rules for extraction prompt ───────────────────────────────────────────
 const GL_RULES=`FLOOR PLAN LIABILITIES (principal curtailments):
 20300=NOTES PAY-NEW CASE-IH
 20400=NOTES PAYABLE-NEW TRUCKS
@@ -438,7 +437,6 @@ Unknown / general → 04000
 GST RULE: Always split GST (5%) into its own GL line (21450) if shown on invoice.
 PST RULE: Always split PST (6% SK) into its own GL line (21400) if shown on invoice.`;
 
-// ── GL accounts for dropdown ─────────────────────────────────────────────────
 const GL_ACCOUNTS=[
   {c:'00300',n:'SALES TRUCK EXPENSE'},{c:'00400',n:'TRAVEL'},{c:'00600',n:'PROMOTION'},
   {c:'00601',n:'ADVERTISING'},{c:'00602',n:'SPONSORSHIPS'},{c:'00700',n:'DEMONSTRATIONS'},
@@ -520,66 +518,34 @@ const VENDOR_DROPDOWN=[
   {c:'DENTAL',n:'DENTAL WEEKLY INDEMNITY'},{c:'ADVANC',n:'MID-MONTH ADVANCES'},
 ];
 
-// ── Config (hardcoded — keys stored in Azure, not browser) ───────────────────
 const CLIENT_ID='2deb4da2-4a75-423e-a51b-eae62cd74332';
 const TENANT_ID='11435cd4-2fb6-4d2e-8298-2c2ad9694709';
 
-// ── MSAL ─────────────────────────────────────────────────────────────────────
 let _msalReady=null;
-
 function getMsalReady(){
   if(!_msalReady){
     const inst=new msal.PublicClientApplication({
-      auth:{
-        clientId:CLIENT_ID,
-        authority:`https://login.microsoftonline.com/${TENANT_ID}`,
-        redirectUri:`${window.location.origin}${window.location.pathname.replace(/\/[^\/]*$/, '/redirect.html')}`,
-      },
+      auth:{clientId:CLIENT_ID,authority:`https://login.microsoftonline.com/${TENANT_ID}`,redirectUri:`${window.location.origin}${window.location.pathname.replace(/\/[^\/]*$/, '/redirect.html')}`},
       cache:{cacheLocation:'sessionStorage',storeAuthStateInCookie:false},
     });
     _msalReady=inst.initialize().then(()=>inst);
   }
   return _msalReady;
 }
-
 function resetMsal(){ _msalReady=null; }
-
 const SCOPES=['User.Read','Mail.Read','Sites.ReadWrite.All'];
-
-async function signIn(){
-  const inst=await getMsalReady();
-  const r=await inst.loginPopup({scopes:SCOPES});
-  return r.account;
-}
-
-async function signOut(){
-  try{
-    const inst=await getMsalReady();
-    await inst.logoutPopup();
-  }catch{}
-  resetMsal();
-}
-
+async function signIn(){const inst=await getMsalReady();const r=await inst.loginPopup({scopes:SCOPES});return r.account;}
+async function signOut(){try{const inst=await getMsalReady();await inst.logoutPopup();}catch{}resetMsal();}
 async function getToken(account){
   const inst=await getMsalReady();
-  try{
-    const r=await inst.acquireTokenSilent({scopes:SCOPES,account});
-    return r.accessToken;
-  }catch(e){
-    const isInteractionRequired=
-      e instanceof msal.InteractionRequiredAuthError||
-      e?.errorCode==='interaction_required'||
-      e?.errorCode==='login_required'||
-      e?.errorCode==='consent_required';
-    if(isInteractionRequired){
-      const r=await inst.acquireTokenPopup({scopes:SCOPES,account});
-      return r.accessToken;
-    }
+  try{const r=await inst.acquireTokenSilent({scopes:SCOPES,account});return r.accessToken;}
+  catch(e){
+    const need=e instanceof msal.InteractionRequiredAuthError||e?.errorCode==='interaction_required'||e?.errorCode==='login_required'||e?.errorCode==='consent_required';
+    if(need){const r=await inst.acquireTokenPopup({scopes:SCOPES,account});return r.accessToken;}
     throw e;
   }
 }
 
-// ── Graph API ────────────────────────────────────────────────────────────────
 async function gGet(path,tok){
   const r=await fetch(`${GRAPH}${path}`,{headers:{Authorization:`Bearer ${tok}`,Accept:'application/json'}});
   if(!r.ok)throw new Error(`Graph ${r.status}: ${(await r.text()).slice(0,200)}`);
@@ -588,29 +554,14 @@ async function gGet(path,tok){
 async function gBinary(path,tok){
   const r=await fetch(`${GRAPH}${path}`,{headers:{Authorization:`Bearer ${tok}`}});
   if(!r.ok)throw new Error(`Graph binary ${r.status}`);
-  const ab=await r.arrayBuffer();
-  let b='';const u=new Uint8Array(ab);
+  const ab=await r.arrayBuffer();let b='';const u=new Uint8Array(ab);
   for(let i=0;i<u.length;i+=8192)b+=String.fromCharCode(...u.slice(i,i+8192));
   return btoa(b);
 }
-async function getMailFolders(tok){
-  const d=await gGet('/me/mailFolders?$top=25&$select=id,displayName',tok);
-  return d.value||[];
-}
+async function getMailFolders(tok){const d=await gGet('/me/mailFolders?$top=25&$select=id,displayName',tok);return d.value||[];}
 async function getUnreadEmails(tok,folderId='inbox'){
-  const url=`/me/mailFolders/${folderId}/messages?$filter=isRead eq false&$select=id,subject,from,receivedDateTime,hasAttachments&$top=50`;
-  const d=await gGet(url,tok);
+  const d=await gGet(`/me/mailFolders/${folderId}/messages?$filter=isRead eq false&$select=id,subject,from,receivedDateTime,hasAttachments&$top=50`,tok);
   return d.value||[];
-}
-async function getSharedMailboxEmails(tok,upn){
-  const url=`/users/${encodeURIComponent(upn)}/mailFolders/inbox/messages?$select=id,subject,from,receivedDateTime,hasAttachments&$top=50`;
-  try{
-    const d=await gGet(url,tok);
-    return(d.value||[]).map(m=>({...m,_mailbox:upn}));
-  }catch(e){
-    console.warn(`Shared mailbox fetch failed for ${upn}:`,e.message);
-    return[];
-  }
 }
 async function getAttachments(tok,msgId,upn){
   const base=upn?`/users/${encodeURIComponent(upn)}`:`/me`;
@@ -621,18 +572,11 @@ async function getAttachmentB64(tok,msgId,attId,upn){
   const base=upn?`/users/${encodeURIComponent(upn)}`:`/me`;
   return gBinary(`${base}/messages/${msgId}/attachments/${attId}/$value`,tok);
 }
-
 async function markAsRead(tok,msgId,upn){
   const base=upn?`/users/${encodeURIComponent(upn)}`:`/me`;
-  try{
-    await fetch(`https://graph.microsoft.com/v1.0${base}/messages/${msgId}`,{
-      method:'PATCH',
-      headers:{Authorization:`Bearer ${tok}`,Accept:'application/json','Content-Type':'application/json'},
-      body:JSON.stringify({isRead:true}),
-    });
-  }catch{}
+  try{await fetch(`https://graph.microsoft.com/v1.0${base}/messages/${msgId}`,{method:'PATCH',headers:{Authorization:`Bearer ${tok}`,Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({isRead:true})});}catch{}
 }
-// ── Anthropic extraction (via Azure Function proxy) ──────────────────────────
+
 const PROXY_URL='https://hergott-ap-proxy-b5fxb3amb8evene3.canadacentral-01.azurewebsites.net/api/anthropic-proxy';
 
 async function extractDoc(b64,name){
@@ -722,22 +666,13 @@ For cc_statement:
 
   let lastErr;
   for(let i=0;i<4;i++){
-    if(i>0){
-      const wait=lastErr&&lastErr.message?.includes('429')?62000:2000*i;
-      await new Promise(r=>setTimeout(r,wait));
-    }
+    if(i>0){const wait=lastErr&&lastErr.message?.includes('429')?62000:2000*i;await new Promise(r=>setTimeout(r,wait));}
     try{
-      const res=await fetch(PROXY_URL,{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          model:MODEL,max_tokens:8000,
-          messages:[{role:'user',content:[
-            {type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}},
-            {type:'text',text:prompt}
-          ]}]
-        })
-      });
+      const res=await fetch(PROXY_URL,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({model:MODEL,max_tokens:8000,messages:[{role:'user',content:[
+          {type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}},
+          {type:'text',text:prompt}
+        ]}]})});
       if(!res.ok){const t=await res.text();throw new Error(`Anthropic ${res.status}: ${t.slice(0,300)}`);}
       const d=await res.json();
       const raw=(d.content||[]).map(c=>c.text||'').join('').trim();
@@ -750,7 +685,6 @@ For cc_statement:
   throw lastErr;
 }
 
-// ── IntelliDealer CSV ─────────────────────────────────────────────────────────
 function fv(v){const s=String(v===undefined||v===null?'':v);return(s.includes(',')||s.includes('"'))?`"${s.replace(/"/g,'""')}"`:`${s}`;}
 function addDays(ds,n){
   if(!ds||ds.length!==8)return'';
@@ -772,100 +706,59 @@ function buildCSV(results){
     const lines=isCC?(r.transactions||[]):(r.lines||[]);
     for(const line of lines){
       const glCC=isCC?'':(line.costCentre||'');
-      rows.push([
-        rid,'01',fv(vendor),'01',fv(total),'',fv(invNum),'','10200','',
-        fv(payable),'','582000',fv(r.poNumber||''),'',fv(purDate),fv(dueDate),
-        fv(line.amount),fv(glCC),fv(line.glAcct),
-        fv(line.cgCode||''),fv(line.stockNum||''),fv(line.description),''
-      ].join(','));
+      rows.push([rid,'01',fv(vendor),'01',fv(total),'',fv(invNum),'','10200','',fv(payable),'','582000',fv(r.poNumber||''),'',fv(purDate),fv(dueDate),fv(line.amount),fv(glCC),fv(line.glAcct),fv(line.cgCode||''),fv(line.stockNum||''),fv(line.description),''].join(','));
     }
     rid++;
   }
   return rows.join('\r\n');
 }
-function downloadCSV(content,filename){
-  const b=new Blob([content],{type:'text/csv;charset=utf-8;'});
-  const u=URL.createObjectURL(b);
-  const a=document.createElement('a');
-  a.href=u;a.download=filename;a.click();
-  URL.revokeObjectURL(u);
-}
 
-// ── SharePoint CSV ─────────────────────────────────────────────────────────
 const SP_SITE='hergottfarmequipment.sharepoint.com,ec9959c7-2e54-4016-9209-9ca22db82da9,87f2bb7e-cc3c-4126-9e1a-dfef8ffc8713';
 const CSV_HEADER='Record ID,Company,Vendor#,Division,Invoice Total,Discount Amount,Invoice #,Bank Cost Center,Bank Account #,Payable Cost Center,Payable Account #,Discount Cost Center,Discount Account #,PO Number,PO Branch,Purchase Date,Due Date,GL Amount,GL Cost Center,GL Account #,Complete Goods Code,Stock #,Description,A/R customer number';
 
-function getCSVFilename(){
-  const d=new Date();
-  const ds=d.toISOString().slice(0,10).replace(/-/g,'');
-  return `Hergott_AP_${ds}.csv`;
-}
+function getCSVFilename(){const d=new Date();return `Hergott_AP_${d.toISOString().slice(0,10).replace(/-/g,'')}.csv`;}
 
-async function appendToOneDrive(tok, csvRows){
+async function appendToOneDrive(tok,csvRows){
   const filename=getCSVFilename();
-  const filePath=`AP Batches/${filename}`;
-  const url=`https://graph.microsoft.com/v1.0/sites/${SP_SITE}/drive/root:/${encodeURIComponent(filePath)}:/content`;
-
+  const url=`https://graph.microsoft.com/v1.0/sites/${SP_SITE}/drive/root:/AP Batches/${filename}:/content`;
   let existing='';
-  try{
-    const r=await fetch(url,{headers:{Authorization:`Bearer ${tok}`}});
-    if(r.ok)existing=await r.text();
-  }catch{}
-
+  try{const r=await fetch(url,{headers:{Authorization:`Bearer ${tok}`}});if(r.ok)existing=await r.text();}catch{}
   const hasHeader=existing.includes('Record ID,Company');
-  const newContent=hasHeader
-    ?existing.trimEnd()+'\r\n'+csvRows
-    :CSV_HEADER+'\r\n'+csvRows;
-
-  const w=await fetch(url,{
-    method:'PUT',
-    headers:{Authorization:`Bearer ${tok}`,'Content-Type':'text/csv'},
-    body:newContent
-  });
+  const newContent=hasHeader?existing.trimEnd()+'\r\n'+csvRows:CSV_HEADER+'\r\n'+csvRows;
+  const w=await fetch(url,{method:'PUT',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'text/csv'},body:newContent});
   if(!w.ok){const t=await w.text();throw new Error(`SharePoint write failed ${w.status}: ${t.slice(0,200)}`);}
   return `hergottfarmequipment.sharepoint.com → Documents/AP Batches/${filename}`;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 function confCls(c){return c>=0.85?'high':c>=0.65?'med':'low';}
 function pct(c){return Math.round((c||0)*100)+'%';}
 
-// ── USD Conversion Banner ─────────────────────────────────────────────────────
 function USDConversionBanner({r,onUpdate}){
   const [rate,setRate]=React.useState(r._usdRate||'');
   const [fee,setFee]=React.useState(r._usdFee||'0');
   const [feeType,setFeeType]=React.useState(r._usdFeeType||'$');
   const [fetching,setFetching]=React.useState(false);
   const [fetchErr,setFetchErr]=React.useState('');
-
   const usdTotal=r._usdOriginal||r.invoiceTotal||0;
-  const feeAmount=feeType==='%'
-    ?parseFloat(usdTotal)*parseFloat(rate||0)*(parseFloat(fee||0)/100)
-    :parseFloat(fee||0);
+  const feeAmount=feeType==='%'?parseFloat(usdTotal)*parseFloat(rate||0)*(parseFloat(fee||0)/100):parseFloat(fee||0);
   const cadTotal=rate?(parseFloat(usdTotal)*parseFloat(rate)+feeAmount).toFixed(2):'';
-
   async function fetchRate(){
     setFetching(true);setFetchErr('');
     try{
       const today=new Date().toISOString().slice(0,10);
       const res=await fetch(`https://www.bankofcanada.ca/valet/observations/FXUSDCAD/json?start_date=${today}&end_date=${today}`);
-      const d=await res.json();
-      const obs=d.observations;
-      if(obs&&obs.length>0){
-        const r2=parseFloat(obs[obs.length-1].FXUSDCAD.v);
-        setRate(r2.toFixed(4));
-      } else {
+      const d=await res.json();const obs=d.observations;
+      if(obs&&obs.length>0){setRate(parseFloat(obs[obs.length-1].FXUSDCAD.v).toFixed(4));}
+      else{
         const yest=new Date(Date.now()-86400000).toISOString().slice(0,10);
         const res2=await fetch(`https://www.bankofcanada.ca/valet/observations/FXUSDCAD/json?start_date=${yest}&end_date=${yest}`);
-        const d2=await res2.json();
-        const obs2=d2.observations;
+        const d2=await res2.json();const obs2=d2.observations;
         if(obs2&&obs2.length>0)setRate(parseFloat(obs2[obs2.length-1].FXUSDCAD.v).toFixed(4));
         else setFetchErr('Rate not available — enter manually');
       }
     }catch(e){setFetchErr('Could not fetch rate — enter manually');}
     setFetching(false);
   }
-
   function applyConversion(){
     if(!rate||!cadTotal)return;
     const newLines=(r.lines||[]).map(l=>{
@@ -876,7 +769,6 @@ function USDConversionBanner({r,onUpdate}){
     onUpdate({...r,invoiceTotal:parseFloat(cadTotal),lines:newLines,currency:'CAD',_usdRate:rate,_usdFee:fee,_usdFeeType:feeType,_usdOriginal:usdTotal,
       warnings:(r.warnings||[]).filter(w=>!w.includes('USD INVOICE')).concat([`Converted from USD $${usdTotal} @ ${rate} + ${feeType==='%'?fee+'%':'$'+fee} fee = CAD $${cadTotal}`])});
   }
-
   return(
     <div className="usd-banner">
       <strong>⚠ USD Invoice — Convert to CAD before export</strong>
@@ -901,7 +793,6 @@ function USDConversionBanner({r,onUpdate}){
   );
 }
 
-// ── Review Card ───────────────────────────────────────────────────────────────
 function ReviewCard({item,result,onUpdate,onRemove,onAddCSV}){
   const r=result;
   const isCC=r.docType==='cc_statement';
@@ -909,29 +800,19 @@ function ReviewCard({item,result,onUpdate,onRemove,onAddCSV}){
   const total=isCC?r.balanceDue:r.invoiceTotal;
   const sum=lines.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);
   const mismatch=Math.abs(sum-total)>0.05;
-
   function upField(k,v){onUpdate({...r,[k]:v});}
-  function upLine(idx,k,v){
-    const ls=[...lines];ls[idx]={...ls[idx],[k]:v};
-    onUpdate({...r,[isCC?'transactions':'lines']:ls});
-  }
-  function rmLine(idx){
-    onUpdate({...r,[isCC?'transactions':'lines']:lines.filter((_,i)=>i!==idx)});
-  }
+  function upLine(idx,k,v){const ls=[...lines];ls[idx]={...ls[idx],[k]:v};onUpdate({...r,[isCC?'transactions':'lines']:ls});}
+  function rmLine(idx){onUpdate({...r,[isCC?'transactions':'lines']:lines.filter((_,i)=>i!==idx)});}
   function addLine(){
-    const blank=isCC
-      ?{date:'',description:'',amount:0,glAcct:'04000',glName:'MISCELLANEOUS',confidence:0.5}
-      :{description:'',amount:0,glAcct:'04000',glName:'MISCELLANEOUS',costCentre:'',cgCode:'',stockNum:'',confidence:0.5};
+    const blank=isCC?{date:'',description:'',amount:0,glAcct:'04000',glName:'MISCELLANEOUS',confidence:0.5}:{description:'',amount:0,glAcct:'04000',glName:'MISCELLANEOUS',costCentre:'',cgCode:'',stockNum:'',confidence:0.5};
     onUpdate({...r,[isCC?'transactions':'lines']:[...lines,blank]});
   }
-
   const oc=r.overallConfidence||0;
   const isUSD=r.currency==='USD';
   const isCreditMemo=r.docType==='credit_memo';
   const isSkip=r.docType==='other'||r.docType==='statement';
   const typeLabel=isCC?'CC Statement':isCreditMemo?'Credit Memo':r.docType==='payroll_remittance'?'Payroll':r.docType==='statement'?'Statement':r.docType==='other'?'Skip':'Invoice';
   const typeCls=isCC?'cc':isCreditMemo?'credit':r.docType==='payroll_remittance'?'payroll':r.docType==='statement'?'statement':r.docType==='other'?'other':'invoice';
-
   return(
     <div className="review-card">
       <div className="rc-head">
@@ -939,9 +820,9 @@ function ReviewCard({item,result,onUpdate,onRemove,onAddCSV}){
         <span className="rc-filename">{item.name}</span>
         {item.source&&<span style={{fontSize:'10px',color:'#AAA',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:180,flexShrink:1}} title={item.source}>{item.source}</span>}
         <span className={`rc-conf ${confCls(oc)}`}>{pct(oc)}</span>
-        {item.b64&&<button className="btn-rc-remove" style={{marginRight:'4px',background:'#1B3D2B',color:'#fff',fontSize:'10px',padding:'2px 8px',borderRadius:'3px',border:'none',cursor:'pointer'}} onClick={()=>{const u=URL.createObjectURL(new Blob([Uint8Array.from(atob(item.b64),c=>c.charCodeAt(0))],{type:'application/pdf'}));window.open(u,'_blank');}}>PDF</button>}<button className="btn-rc-remove" onClick={onRemove}>×</button>
+        {item.b64&&<button className="btn-rc-remove" style={{marginRight:'4px',background:'#1B3D2B',color:'#fff',fontSize:'10px',padding:'2px 8px',borderRadius:'3px',border:'none',cursor:'pointer'}} onClick={()=>{const u=URL.createObjectURL(new Blob([Uint8Array.from(atob(item.b64),c=>c.charCodeAt(0))],{type:'application/pdf'}));window.open(u,'_blank');}}>PDF</button>}
+        <button className="btn-rc-remove" onClick={onRemove}>×</button>
       </div>
-
       {isSkip&&(
         <div style={{padding:'10px 14px'}}>
           {r.warnings&&r.warnings.map((w,i)=><div key={i} style={{fontSize:'12px',color:'#7A5A00',background:'#FFFBF0',border:'1px solid #F5E27A',borderRadius:'4px',padding:'7px 10px',marginBottom:6}}>⚠ {w}</div>)}
@@ -955,166 +836,88 @@ function ReviewCard({item,result,onUpdate,onRemove,onAddCSV}){
           </div>
         </div>
       )}
-
       {!isSkip&&(<><div className="rc-body">
         {isUSD&&<USDConversionBanner r={r} onUpdate={onUpdate}/>}
         <div className="rc-fields" style={{gridTemplateColumns:isCC?'2fr 1fr 1fr 1fr':'2fr 1fr 1fr 1fr 1fr 1fr'}}>
           <div className="rc-field">
             <div className="rc-field-label">Vendor</div>
-            <select className={`rc-select${(r.vendorConfidence||0)<0.65?' warn':''}`}
-              value={r.vendorCode||''}
-              onChange={e=>{
-                const v=VENDOR_DROPDOWN.find(x=>x.c===e.target.value);
-                const pay=['CASE','CASEU','93724'].includes(e.target.value)?'20040':'20000';
-                onUpdate({...r,vendorCode:e.target.value,vendorName:v?.n||e.target.value,payableAcct:pay});
-              }}>
+            <select className={`rc-select${(r.vendorConfidence||0)<0.65?' warn':''}`} value={r.vendorCode||''}
+              onChange={e=>{const v=VENDOR_DROPDOWN.find(x=>x.c===e.target.value);const pay=['CASE','CASEU','93724'].includes(e.target.value)?'20040':'20000';onUpdate({...r,vendorCode:e.target.value,vendorName:v?.n||e.target.value,payableAcct:pay});}}>
               {VENDOR_DROPDOWN.map(v=><option key={v.c} value={v.c}>{v.c} — {v.n}</option>)}
-              {r.vendorCode&&!VENDOR_DROPDOWN.find(v=>v.c===r.vendorCode)&&
-                <option value={r.vendorCode}>{r.vendorCode} — {r.vendorName}</option>}
+              {r.vendorCode&&!VENDOR_DROPDOWN.find(v=>v.c===r.vendorCode)&&<option value={r.vendorCode}>{r.vendorCode} — {r.vendorName}</option>}
             </select>
           </div>
-
           {!isCC&&<>
-            <div className="rc-field">
-              <div className="rc-field-label">Invoice #</div>
-              <input className="rc-input" value={r.invoiceNumber||''}
-                onChange={e=>upField('invoiceNumber',e.target.value)}/>
-            </div>
-            <div className="rc-field">
-              <div className="rc-field-label">Invoice Date</div>
-              <input className="rc-input" value={r.invoiceDate||''} placeholder="YYYYMMDD"
-                onChange={e=>upField('invoiceDate',e.target.value)}/>
-            </div>
-            <div className="rc-field">
-              <div className="rc-field-label">Due Date</div>
-              <input className="rc-input" value={r.dueDate||''} placeholder="YYYYMMDD"
-                onChange={e=>upField('dueDate',e.target.value)}/>
-            </div>
-            <div className="rc-field">
-              <div className="rc-field-label">PO Number</div>
-              <input className="rc-input" value={r.poNumber||''} placeholder="—"
-                onChange={e=>upField('poNumber',e.target.value)}/>
-            </div>
-            <div className="rc-field">
-              <div className="rc-field-label">Payable Acct</div>
-              <select className="rc-select" value={r.payableAcct||'20000'}
-                onChange={e=>upField('payableAcct',e.target.value)}>
+            <div className="rc-field"><div className="rc-field-label">Invoice #</div><input className="rc-input" value={r.invoiceNumber||''} onChange={e=>upField('invoiceNumber',e.target.value)}/></div>
+            <div className="rc-field"><div className="rc-field-label">Invoice Date</div><input className="rc-input" value={r.invoiceDate||''} placeholder="YYYYMMDD" onChange={e=>upField('invoiceDate',e.target.value)}/></div>
+            <div className="rc-field"><div className="rc-field-label">Due Date</div><input className="rc-input" value={r.dueDate||''} placeholder="YYYYMMDD" onChange={e=>upField('dueDate',e.target.value)}/></div>
+            <div className="rc-field"><div className="rc-field-label">PO Number</div><input className="rc-input" value={r.poNumber||''} placeholder="—" onChange={e=>upField('poNumber',e.target.value)}/></div>
+            <div className="rc-field"><div className="rc-field-label">Payable Acct</div>
+              <select className="rc-select" value={r.payableAcct||'20000'} onChange={e=>upField('payableAcct',e.target.value)}>
                 <option value="20000">20000 — Accounts Payable</option>
                 <option value="20040">20040 — Case Corp (floor plan)</option>
               </select>
             </div>
           </>}
-
           {isCC&&<>
-            <div className="rc-field">
-              <div className="rc-field-label">Statement Date</div>
-              <input className="rc-input" value={r.statementDate||''} placeholder="YYYYMMDD"
-                onChange={e=>upField('statementDate',e.target.value)}/>
-            </div>
-            <div className="rc-field">
-              <div className="rc-field-label">Period Start</div>
-              <input className="rc-input" value={r.periodStart||''} placeholder="YYYYMMDD"
-                onChange={e=>upField('periodStart',e.target.value)}/>
-            </div>
-            <div className="rc-field">
-              <div className="rc-field-label">Period End</div>
-              <input className="rc-input" value={r.periodEnd||''} placeholder="YYYYMMDD"
-                onChange={e=>upField('periodEnd',e.target.value)}/>
-            </div>
+            <div className="rc-field"><div className="rc-field-label">Statement Date</div><input className="rc-input" value={r.statementDate||''} placeholder="YYYYMMDD" onChange={e=>upField('statementDate',e.target.value)}/></div>
+            <div className="rc-field"><div className="rc-field-label">Period Start</div><input className="rc-input" value={r.periodStart||''} placeholder="YYYYMMDD" onChange={e=>upField('periodStart',e.target.value)}/></div>
+            <div className="rc-field"><div className="rc-field-label">Period End</div><input className="rc-input" value={r.periodEnd||''} placeholder="YYYYMMDD" onChange={e=>upField('periodEnd',e.target.value)}/></div>
           </>}
         </div>
-
         <div className="rc-section-title">
           GL Lines
           {mismatch&&<span className="balance-warn">⚠ Lines sum ${sum.toFixed(2)} ≠ total ${(total||0).toFixed(2)} — fix before export</span>}
         </div>
         <table className="gl-table">
-          <thead>
-            <tr>
-              {isCC&&<th style={{width:86}}>Date</th>}
-              <th>Description</th>
-              <th style={{width:180}}>GL Account</th>
-              <th className="r" style={{width:76}}>Amount</th>
-              {!isCC&&<th style={{width:34}} title="Cost Centre">CC</th>}
-              {!isCC&&<th style={{width:36}} title="Complete Goods Code">CGC</th>}
-              {!isCC&&<th style={{width:70}} title="Stock #">Stock #</th>}
-              <th style={{width:38,textAlign:'center'}}>Conf</th>
-              <th style={{width:22}}></th>
-            </tr>
-          </thead>
+          <thead><tr>
+            {isCC&&<th style={{width:86}}>Date</th>}
+            <th>Description</th><th style={{width:180}}>GL Account</th><th className="r" style={{width:76}}>Amount</th>
+            {!isCC&&<th style={{width:34}} title="Cost Centre">CC</th>}
+            {!isCC&&<th style={{width:36}} title="Complete Goods Code">CGC</th>}
+            {!isCC&&<th style={{width:70}} title="Stock #">Stock #</th>}
+            <th style={{width:38,textAlign:'center'}}>Conf</th><th style={{width:22}}></th>
+          </tr></thead>
           <tbody>
             {lines.map((line,idx)=>(
               <tr key={idx}>
-                {isCC&&<td>
-                  <input className="td-input" style={{width:80}} value={line.date||''} placeholder="YYYYMMDD"
-                    onChange={e=>upLine(idx,'date',e.target.value)}/>
-                </td>}
-                <td><input className="td-input" value={line.description||''}
-                  onChange={e=>upLine(idx,'description',e.target.value)}/></td>
+                {isCC&&<td><input className="td-input" style={{width:80}} value={line.date||''} placeholder="YYYYMMDD" onChange={e=>upLine(idx,'date',e.target.value)}/></td>}
+                <td><input className="td-input" value={line.description||''} onChange={e=>upLine(idx,'description',e.target.value)}/></td>
                 <td>
                   <select className="td-select" value={line.glAcct||''}
-                    onChange={e=>{
-                      const gl=GL_ACCOUNTS.find(g=>g.c===e.target.value);
-                      const ls=[...lines];
-                      ls[idx]={...ls[idx],glAcct:e.target.value,...(gl?{glName:gl.n}:{})};
-                      onUpdate({...r,[isCC?'transactions':'lines']:ls});
-                    }}>
+                    onChange={e=>{const gl=GL_ACCOUNTS.find(g=>g.c===e.target.value);const ls=[...lines];ls[idx]={...ls[idx],glAcct:e.target.value,...(gl?{glName:gl.n}:{})};onUpdate({...r,[isCC?'transactions':'lines']:ls});}}>
                     {GL_ACCOUNTS.map(g=><option key={g.c} value={g.c}>{g.c} {g.n}</option>)}
-                    {line.glAcct&&!GL_ACCOUNTS.find(g=>g.c===line.glAcct)&&
-                      <option value={line.glAcct}>{line.glAcct} {line.glName}</option>}
+                    {line.glAcct&&!GL_ACCOUNTS.find(g=>g.c===line.glAcct)&&<option value={line.glAcct}>{line.glAcct} {line.glName}</option>}
                   </select>
                 </td>
                 <td className="td-r">
                   <input className="td-input" style={{textAlign:'right',width:70}}
                     value={line._amtStr!==undefined?line._amtStr:(line.amount!=null?(parseFloat(line.amount)||0).toFixed(2):'')}
                     onChange={e=>upLine(idx,'_amtStr',e.target.value)}
-                    onBlur={e=>{
-                      const v=parseFloat(e.target.value)||0;
-                      const ls=[...lines];ls[idx]={...ls[idx],amount:v,_amtStr:undefined};
-                      onUpdate({...r,[isCC?'transactions':'lines']:ls});
-                    }}
+                    onBlur={e=>{const v=parseFloat(e.target.value)||0;const ls=[...lines];ls[idx]={...ls[idx],amount:v,_amtStr:undefined};onUpdate({...r,[isCC?'transactions':'lines']:ls});}}
                     placeholder="0.00"/>
                 </td>
-                {!isCC&&<td>
-                  <input className="td-input" style={{width:30}} value={line.costCentre||''} placeholder="—"
-                    onChange={e=>upLine(idx,'costCentre',e.target.value)}/>
-                </td>}{!isCC&&<td>
-                  <input className="td-input" style={{width:34}} value={line.cgCode||''} placeholder="—"
-                    onChange={e=>upLine(idx,'cgCode',e.target.value)}/>
-                </td>}{!isCC&&<td><input className="td-input" style={{width:70}} value={line.stockNum||''} placeholder="—"
-                    onChange={e=>upLine(idx,'stockNum',e.target.value)}/>
-                </td>}
-                <td style={{textAlign:'center'}}>
-                  <span className={`conf-dot ${confCls(line.confidence||0)}`} title={pct(line.confidence||0)}/>
-                </td>
-                <td>
-                  <button className="btn-del-line" onClick={()=>rmLine(idx)}>×</button>
-                </td>
+                {!isCC&&<td><input className="td-input" style={{width:30}} value={line.costCentre||''} placeholder="—" onChange={e=>upLine(idx,'costCentre',e.target.value)}/></td>}
+                {!isCC&&<td><input className="td-input" style={{width:34}} value={line.cgCode||''} placeholder="—" onChange={e=>upLine(idx,'cgCode',e.target.value)}/></td>}
+                {!isCC&&<td><input className="td-input" style={{width:70}} value={line.stockNum||''} placeholder="—" onChange={e=>upLine(idx,'stockNum',e.target.value)}/></td>}
+                <td style={{textAlign:'center'}}><span className={`conf-dot ${confCls(line.confidence||0)}`} title={pct(line.confidence||0)}/></td>
+                <td><button className="btn-del-line" onClick={()=>rmLine(idx)}>×</button></td>
               </tr>
             ))}
           </tbody>
         </table>
         <button className="btn-add-line" onClick={addLine}>+ Add Line</button>
-
-        {r.warnings&&r.warnings.length>0&&(
-          <div className="rc-warnings">
-            {r.warnings.map((w,i)=><div key={i} className="rc-warn-item">{w}</div>)}
-          </div>
-        )}
-        {r.notes&&r.notes.trim()&&(
-          <div className="rc-notes">
-            <div className="rc-note-item">{r.notes}</div>
-          </div>
-        )}
+        {r.warnings&&r.warnings.length>0&&(<div className="rc-warnings">{r.warnings.map((w,i)=><div key={i} className="rc-warn-item">{w}</div>)}</div>)}
+        {r.notes&&r.notes.trim()&&(<div className="rc-notes"><div className="rc-note-item">{r.notes}</div></div>)}
       </div>
-
       <div className="rc-footer">
         <span className="rc-footer-label">{isCC?'Balance Due':'Invoice Total'}</span>
         {!isSkip&&!mismatch&&!isUSD&&<button
-          style={{padding:'4px 12px',background:'#1B3D2B',color:'#fff',border:'none',borderRadius:'4px',fontFamily:"'Barlow Condensed',sans-serif",fontSize:'13px',fontWeight:700,letterSpacing:'0.05em',textTransform:'uppercase',cursor:'pointer'}}
-          onClick={()=>onAddCSV&&onAddCSV(r)}
-          title="Append this document to today's OneDrive CSV">
-          + Add to CSV
+          style={{padding:'4px 12px',background:r._addedToCSV?'#2D6A4F':'#1B3D2B',color:'#fff',border:'none',borderRadius:'4px',fontFamily:"'Barlow Condensed',sans-serif",fontSize:'13px',fontWeight:700,letterSpacing:'0.05em',textTransform:'uppercase',cursor:r._addedToCSV?'default':'pointer',opacity:r._addedToCSV?0.7:1}}
+          onClick={()=>!r._addedToCSV&&onAddCSV&&onAddCSV(item.id,r)}
+          disabled={!!r._addedToCSV}
+          title={r._addedToCSV?"Already added to today's CSV":"Append this document to today's OneDrive CSV"}>
+          {r._addedToCSV?'Added ✓':'+ Add to CSV'}
         </button>}
         <span className="rc-total" style={{color:isCreditMemo?'#C0392B':undefined}}>${(total||0).toFixed(2)}</span>
       </div>
@@ -1123,13 +926,8 @@ function ReviewCard({item,result,onUpdate,onRemove,onAddCSV}){
   );
 }
 
-// ── Toast ─────────────────────────────────────────────────────────────────────
-function Toast({toast}){
-  if(!toast)return null;
-  return<div className={`toast ${toast.type}`}>{toast.msg}</div>;
-}
+function Toast({toast}){if(!toast)return null;return<div className={`toast ${toast.type}`}>{toast.msg}</div>;}
 
-// ── App ───────────────────────────────────────────────────────────────────────
 function App(){
   const[account,setAccount]=useState(null);
   const[token,setToken]=useState(null);
@@ -1147,29 +945,15 @@ function App(){
   const dropRef=useRef(null);
   const fileRef=useRef(null);
 
-  function showToast(msg,type='info',ms=3500){
-    setToast({msg,type});
-    setTimeout(()=>setToast(null),ms);
-  }
+  function showToast(msg,type='info',ms=3500){setToast({msg,type});setTimeout(()=>setToast(null),ms);}
 
-  useEffect(()=>{
-    if(!token)return;
-    getMailFolders(token).then(f=>setFolders(f)).catch(()=>{});
-  },[token]);
+  useEffect(()=>{if(!token)return;getMailFolders(token).then(f=>setFolders(f)).catch(()=>{});},[token]);
 
   async function handleSignIn(){
-    try{
-      const acc=await signIn();
-      setAccount(acc);
-      const tok=await getToken(acc);
-      setToken(tok);
-      showToast(`Signed in as ${acc.username}`,'success');
-    }catch(e){showToast(`Sign-in failed: ${e.message}`,'error',6000);}
+    try{const acc=await signIn();setAccount(acc);const tok=await getToken(acc);setToken(tok);showToast(`Signed in as ${acc.username}`,'success');}
+    catch(e){showToast(`Sign-in failed: ${e.message}`,'error',6000);}
   }
-  async function handleSignOut(){
-    try{await signOut();}catch{}
-    setAccount(null);setToken(null);setEmails([]);
-  }
+  async function handleSignOut(){try{await signOut();}catch{}setAccount(null);setToken(null);setEmails([]);}
 
   async function handleScan(){
     if(!token){showToast('Sign in first','error');return;}
@@ -1209,25 +993,16 @@ function App(){
     setCheckedEmails(new Set());
   }
 
-  function toggleCheck(id){
-    setCheckedEmails(prev=>{const s=new Set(prev);s.has(id)?s.delete(id):s.add(id);return s;});
-  }
-  function toggleCheckAll(){
-    setCheckedEmails(prev=>prev.size===emails.length?new Set():new Set(emails.map(m=>m.id)));
-  }
+  function toggleCheck(id){setCheckedEmails(prev=>{const s=new Set(prev);s.has(id)?s.delete(id):s.add(id);return s;});}
+  function toggleCheckAll(){setCheckedEmails(prev=>prev.size===emails.length?new Set():new Set(emails.map(m=>m.id)));}
 
   function addFiles(files){
-    Array.from(files)
-      .filter(f=>f.type==='application/pdf'||f.name.toLowerCase().endsWith('.pdf'))
-      .forEach(file=>{
-        const id=`drop_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
-        const reader=new FileReader();
-        reader.onload=e=>{
-          const b64=e.target.result.split(',')[1];
-          setQueue(q=>[...q,{id,name:file.name,b64,source:'Drag & Drop',status:'pending'}]);
-        };
-        reader.readAsDataURL(file);
-      });
+    Array.from(files).filter(f=>f.type==='application/pdf'||f.name.toLowerCase().endsWith('.pdf')).forEach(file=>{
+      const id=`drop_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+      const reader=new FileReader();
+      reader.onload=e=>{const b64=e.target.result.split(',')[1];setQueue(q=>[...q,{id,name:file.name,b64,source:'Drag & Drop',status:'pending'}]);};
+      reader.readAsDataURL(file);
+    });
   }
 
   async function extractItem(item){
@@ -1246,18 +1021,12 @@ function App(){
     const pending=queue.filter(x=>x.status==='pending');
     if(!pending.length)return;
     setProcessing(true);
-    for(let i=0;i<pending.length;i++){
-      if(i>0)await new Promise(r=>setTimeout(r,4000));
-      await extractItem(pending[i]);
-    }
+    for(let i=0;i<pending.length;i++){if(i>0)await new Promise(r=>setTimeout(r,4000));await extractItem(pending[i]);}
     setProcessing(false);
     showToast(`Processed ${pending.length} document${pending.length!==1?'s':''}`,'success');
   }
 
-  function removeItem(id){
-    setQueue(q=>q.filter(x=>x.id!==id));
-    setResults(r=>{const n={...r};delete n[id];return n;});
-  }
+  function removeItem(id){setQueue(q=>q.filter(x=>x.id!==id));setResults(r=>{const n={...r};delete n[id];return n;});}
   function updateResult(id,r){setResults(prev=>({...prev,[id]:r}));}
 
   function onDragOver(e){e.preventDefault();dropRef.current?.classList.add('active');}
@@ -1288,12 +1057,15 @@ function App(){
   }).length;
   const blocked=reviewed.length-exportable.length;
 
-  async function handleAddCSV(r){
+  // FIX: accepts itemId so it can mark _addedToCSV on the result after success
+  async function handleAddCSV(itemId,r){
     if(!token){showToast('Sign in first','error');return;}
+    if(r._addedToCSV){showToast('Already added — remove card to re-add','error');return;}
     try{
       const tok=await getToken(account);setToken(tok);
       const rows=buildCSV([r]).split('\r\n').slice(1).join('\r\n');
       const path=await appendToOneDrive(tok,rows);
+      updateResult(itemId,{...r,_addedToCSV:true});
       showToast(`Added to OneDrive: ${path}`,'success',4000);
     }catch(e){showToast(`OneDrive error: ${e.message}`,'error',6000);}
   }
@@ -1306,63 +1078,40 @@ function App(){
         <div className="app-logo">Hergott <span>Farm Equipment</span></div>
         <div className="header-divider"/>
         <div className="header-sub">AP Invoice Processor</div>
-        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.4.0 build 20260409.014</div>
+        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.4.0 build 20260410.001</div>
         <div className="header-spacer"/>
-        {account?(
-          <div className="header-user">
-            <span>{account.username}</span>
-            <button className="btn-sign-out" onClick={handleSignOut}>Sign Out</button>
-          </div>
-        ):(
-          <button className="btn-sign-in" onClick={handleSignIn}>Sign In with Microsoft</button>
-        )}
+        {account?(<div className="header-user"><span>{account.username}</span><button className="btn-sign-out" onClick={handleSignOut}>Sign Out</button></div>)
+          :(<button className="btn-sign-in" onClick={handleSignIn}>Sign In with Microsoft</button>)}
       </div>
-
       <div className="app-body">
         <div className="left-panel">
           <div className="tabs">
             <button className={`tab${tab==='outlook'?' active':''}`} onClick={()=>setTab('outlook')}>Outlook Inbox</button>
             <button className={`tab${tab==='drop'?' active':''}`} onClick={()=>setTab('drop')}>Drag &amp; Drop</button>
           </div>
-
           {tab==='outlook'&&(
             <div className="panel-section">
-              {!account?(
-                <div className="no-emails">Sign in to scan your Outlook inbox</div>
-              ):(
+              {!account?(<div className="no-emails">Sign in to scan your Outlook inbox</div>):(
                 <>
                   <div className="folder-row">
                     <span style={{flex:1,fontSize:'11px',color:'#888',alignSelf:'center',fontStyle:'italic'}}>AP mailbox</span>
                     <button className="btn-scan" onClick={handleScan} disabled={scanning}>{scanning?<><span className="spin"/>Scanning</>:'Scan Now'}</button>
                   </div>
-                  {emails.length===0&&!scanning&&(
-                    <div className="no-emails">No unread emails with PDF attachments</div>
-                  )}
+                  {emails.length===0&&!scanning&&<div className="no-emails">No unread emails with PDF attachments</div>}
                   {emails.length>0&&(
                     <>
                       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'5px 10px',borderBottom:'1px solid #E6E3DE',background:'#F5F3EF'}}>
                         <label style={{display:'flex',alignItems:'center',gap:6,fontSize:'11px',color:'#555',cursor:'pointer',fontWeight:600}}>
-                          <input type="checkbox" style={{cursor:'pointer'}}
-                            checked={checkedEmails.size===emails.length&&emails.length>0}
-                            onChange={toggleCheckAll}/>
+                          <input type="checkbox" style={{cursor:'pointer'}} checked={checkedEmails.size===emails.length&&emails.length>0} onChange={toggleCheckAll}/>
                           {checkedEmails.size===emails.length&&emails.length>0?'Uncheck All':'Check All'}
                           {checkedEmails.size>0&&<span style={{color:'#1B3D2B'}}>({checkedEmails.size} selected)</span>}
                         </label>
-                        {checkedEmails.size>0&&(
-                          <button className="btn-scan" style={{padding:'3px 10px',fontSize:'11px'}}
-                            onClick={addCheckedToQueue}>
-                            Add {checkedEmails.size} to Batch
-                          </button>
-                        )}
+                        {checkedEmails.size>0&&<button className="btn-scan" style={{padding:'3px 10px',fontSize:'11px'}} onClick={addCheckedToQueue}>Add {checkedEmails.size} to Batch</button>}
                       </div>
                       <div className="email-list">
                         {emails.map(msg=>(
-                          <div key={msg.id} className="email-item" onClick={()=>toggleCheck(msg.id)}
-                            style={{background:checkedEmails.has(msg.id)?'#EDF7F1':''}}>
-                            <input type="checkbox" style={{cursor:'pointer',flexShrink:0}}
-                              checked={checkedEmails.has(msg.id)}
-                              onChange={()=>toggleCheck(msg.id)}
-                              onClick={e=>e.stopPropagation()}/>
+                          <div key={msg.id} className="email-item" onClick={()=>toggleCheck(msg.id)} style={{background:checkedEmails.has(msg.id)?'#EDF7F1':''}}>
+                            <input type="checkbox" style={{cursor:'pointer',flexShrink:0}} checked={checkedEmails.has(msg.id)} onChange={()=>toggleCheck(msg.id)} onClick={e=>e.stopPropagation()}/>
                             <div className="email-info" style={{flex:1}}>
                               <div className="email-subject">{msg.subject||'(no subject)'}</div>
                               <div className="email-meta">{msg.from?.emailAddress?.name||msg.from?.emailAddress?.address} · {new Date(msg.receivedDateTime).toLocaleDateString('en-CA')}</div>
@@ -1377,54 +1126,35 @@ function App(){
               )}
             </div>
           )}
-
           {tab==='drop'&&(
             <div className="panel-section">
-              <div className="drop-zone" ref={dropRef}
-                onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
-                onClick={()=>fileRef.current?.click()}>
+              <div className="drop-zone" ref={dropRef} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} onClick={()=>fileRef.current?.click()}>
                 <div className="drop-zone-icon">📄</div>
                 <div className="drop-zone-text">Drop invoice PDFs here</div>
                 <div className="drop-zone-hint">Or click to browse files</div>
-                <input ref={fileRef} type="file" accept=".pdf,application/pdf" multiple hidden
-                  onChange={e=>{addFiles(e.target.files);e.target.value='';}}/>
+                <input ref={fileRef} type="file" accept=".pdf,application/pdf" multiple hidden onChange={e=>{addFiles(e.target.files);e.target.value='';}}/>
               </div>
             </div>
           )}
-
           <div className="queue-wrap">
             <div className="queue-header">
               <span className="queue-label">Batch ({queue.length})</span>
-              {pendingCount>0&&(
-                <button className="btn-extract-all" onClick={extractAll} disabled={processing}>
-                  {processing?<><span className="spin"/>Processing…</>:`Extract ${pendingCount}`}
-                </button>
-              )}
+              {pendingCount>0&&<button className="btn-extract-all" onClick={extractAll} disabled={processing}>{processing?<><span className="spin"/>Processing…</>:`Extract ${pendingCount}`}</button>}
             </div>
             <div className="queue-list">
               {queue.length===0&&<div className="queue-empty">Add documents from Outlook or drag-and-drop</div>}
               {queue.map(item=>(
                 <div key={item.id} className={`queue-item ${item.status}`}>
-                  <span className="qi-icon">
-                    {item.status==='pending'?'📄':item.status==='processing'?'⏳':item.status==='done'?'✅':'❌'}
-                  </span>
-                  <div className="qi-info">
-                    <div className="qi-name">{item.name}</div>
-                    <div className="qi-source">{item.source}</div>
-                  </div>
-                  <span className={`qi-status ${item.status}`}>
-                    {item.status==='error'?'Error':item.status==='processing'?'…':item.status}
-                  </span>
-                  {item.status==='pending'&&(
-                    <button className="btn-qi-extract" onClick={()=>extractItem(item)}>Extract</button>
-                  )}
+                  <span className="qi-icon">{item.status==='pending'?'📄':item.status==='processing'?'⏳':item.status==='done'?'✅':'❌'}</span>
+                  <div className="qi-info"><div className="qi-name">{item.name}</div><div className="qi-source">{item.source}</div></div>
+                  <span className={`qi-status ${item.status}`}>{item.status==='error'?'Error':item.status==='processing'?'…':item.status}</span>
+                  {item.status==='pending'&&<button className="btn-qi-extract" onClick={()=>extractItem(item)}>Extract</button>}
                   <button className="btn-qi-remove" onClick={()=>removeItem(item.id)}>×</button>
                 </div>
               ))}
             </div>
           </div>
         </div>
-
         <div className="right-panel">
           {reviewed.length===0&&(
             <div className="empty-state">
@@ -1433,14 +1163,12 @@ function App(){
               <div className="empty-hint">Add PDFs from Outlook or drag-and-drop, then click Extract</div>
             </div>
           )}
-
           {reviewed.map(item=>(
             <ReviewCard key={item.id} item={item} result={results[item.id]}
               onUpdate={r=>updateResult(item.id,r)}
               onRemove={()=>removeItem(item.id)}
               onAddCSV={handleAddCSV}/>
           ))}
-
           {reviewed.length>0&&(
             <div className="export-bar">
               <div className="export-info">
@@ -1454,7 +1182,6 @@ function App(){
           )}
         </div>
       </div>
-
       <Toast toast={toast}/>
     </div>
   );
