@@ -7,7 +7,7 @@
      build 20260409.002  Export filename includes HHMM timestamp
      build 20260409.003  Prompt: Customer PO # rule; 14000 vendor rule explicit
      v0.4.0 build 20260409.001  Doc type detection; USD conversion; payment terms; dept account warnings; MISC vendor; CGC field
-     v0.4.0 build 20260409.002  Email list checkboxes: check all, check individual, Add Selected to Queue
+     v0.4.0 build 20260409.004  Stock # always blank on supplier invoices (part numbers ≠ stock numbers); PO Branch confirmed always blank
 -->
 <html lang="en">
 <head>
@@ -645,7 +645,7 @@ Classify as one of:
 - "other" — Order confirmations, parts confirmations, payment receipts, or anything not payable
 
 CRITICAL docType rules — check BEFORE proceeding:
-- If document says "DO NOT PAY", "INVOICE TO FOLLOW", "Parts Confirmation", "Order Acknowledgment", "Order Confirmation" → docType="other", add warning "Order confirmation only — do not process"
+- If document header/title says "DO NOT PAY", "INVOICE TO FOLLOW", "Parts Confirmation", "Order Acknowledgment", "Order Confirmation" → docType="other", add warning "Order confirmation only — do not process". NOTE: A "Work Order" or "WO" is a legitimate invoice — do NOT classify as other.
 - If document shows "Balance Due: $0.00" or "Amount Due: $0.00" with a payment already applied → docType="other", add warning "Payment receipt — balance $0 — do not process"
 - If document is titled "Statement" or "Account Statement" and shows aging/previous balance rather than a single invoice → docType="statement", add warning "Monthly statement — verify matching invoices already posted before processing"
 - If document is titled "Credit Memo" or "Credit Note" → docType="credit_memo" — invoiceTotal and ALL GL amounts must be NEGATIVE
@@ -677,15 +677,16 @@ PAYMENT TERMS — calculate dueDate precisely:
 STEP 4 — GL CODING (apply precisely):
 ${GL_RULES}
 
-DEPARTMENTAL ACCOUNTS — these accounts are used across multiple profit centres (departments). When coding to one of these, add a warning: "Departmental account — append profit centre if required: 0=Admin 1=Sales 3=Parts 4=Service 6=Trucking":
-00400 TRAVEL, 00460 MEALS & ENTERTAINMENT, 00500 TRAINING, 00600 PROMOTION, 00601 ADVERTISING, 00602 SPONSORSHIPS, 00700 DEMONSTRATIONS, 00800 AFTER SALES EXPENSE, 01100 PARTS FREIGHT HANDLING, 01400 SHOP SUPP & TOOL REPAIRS, 01500 TRUCK EXPENSE, 01402 BOOT & SAFETY GEAR, 02000 OFFICE SUPPLIES, 02370 VACATION & HOLIDAY PAY, 04500 COMPUTER SERVICES, 04600 MEALS & ENTERTAINMENT
+DEPARTMENTAL ACCOUNTS — these specific accounts are split across multiple profit centres. When coding to one of these, add a warning "Departmental account — append profit centre if required: 0=Admin 1=Sales 3=Parts 4=Service 6=Trucking":
+00460 MEALS & ENTERTAINMENT, 00500 TRAINING, 00600 PROMOTION, 00601 ADVERTISING, 00602 SPONSORSHIPS, 00700 DEMONSTRATIONS, 00800 AFTER SALES EXPENSE, 01402 BOOT & SAFETY GEAR, 01500 TRUCK EXPENSE, 02000 OFFICE SUPPLIES, 02370 VACATION & HOLIDAY PAY, 04500 COMPUTER SERVICES, 04600 MEALS & ENTERTAINMENT
+DO NOT add departmental warning for: 01100 PARTS FREIGHT (always dept 3), 01101 ENVIRONMENTAL CHARGE (always dept 3), 01400 SHOP SUPP (always dept 4), 01510-01560 DELIVERY TRUCK (always dept 6), 00900 FLOOR PLAN INTEREST (always dept 1)
 
 VENDOR-SPECIFIC RULES:
 - VitalEdge / VitalECM / VRC / Vital Records Control → vendorCode="97387", GL 04500 COMPUTER SERVICES
 - Westward Parts → always 14001, never 14000
 - Golden West Broadcasting / BOLT 107.5 / DiscoverHumboldt → GL 00601 ADVERTISING + departmental warning
 - Rawlco Radio → GL 00601 ADVERTISING + departmental warning
-- Colony Chevrolet / any vehicle dealer → GL 01500 TRUCK EXPENSE
+- Colony Chevrolet GMC / Colony Chev → vendorCode="91033", GL 01500 TRUCK EXPENSE — these are vehicle repair invoices FROM Colony TO Hergott, they ARE valid AP invoices; do NOT classify as "other"
 - Canadian Energy / CDN Energy → vendorCode="MISC"
 - Ag Express Electronics → vendorCode="MISC"; if USD set currency="USD"
 
@@ -696,6 +697,8 @@ Rules for every invoice:
 - Floor plan interest (GL 00900) ALWAYS gets costCentre="1".
 - Do not default to 04000 when a more specific code applies.
 - For credit_memo: ALL amounts including GL lines must be negative numbers.
+- stockNum MUST be blank for ALL supplier invoice lines. Part numbers, item codes, and order numbers are NOT stock numbers. Stock # in IntelliDealer refers only to equipment unit identifiers (e.g. U29583, U76320) used for floor plan curtailments — these never appear on regular supplier invoices. Leave stockNum="" always.
+- PO Branch is always blank — leave out of your response or set to "".
 
 STEP 5 — VALIDATE:
 Sum all GL line amounts. Must equal invoiceTotal within $0.05. Flag anomalies in warnings.
@@ -893,7 +896,16 @@ function ReviewCard({item,result,onUpdate,onRemove}){
         {item.b64&&<button className="btn-rc-remove" style={{marginRight:'4px',background:'#1B3D2B',color:'#fff',fontSize:'10px',padding:'2px 8px',borderRadius:'3px',border:'none',cursor:'pointer'}} onClick={()=>{const u=URL.createObjectURL(new Blob([Uint8Array.from(atob(item.b64),c=>c.charCodeAt(0))],{type:'application/pdf'}));window.open(u,'_blank');}}>PDF</button>}<button className="btn-rc-remove" onClick={onRemove}>×</button>
       </div>
 
-      <div className="rc-body">
+      {/* Collapsed view for skip/statement docs — no form, no export */}
+      {isSkip&&(
+        <div style={{padding:'10px 14px'}}>
+          {r.warnings&&r.warnings.map((w,i)=><div key={i} style={{fontSize:'12px',color:'#7A5A00',background:'#FFFBF0',border:'1px solid #F5E27A',borderRadius:'4px',padding:'7px 10px',marginBottom:6}}>⚠ {w}</div>)}
+          {r.notes&&<div style={{fontSize:'11px',color:'#1B5E35',background:'#EAF4F0',border:'1px solid #A8D5BC',borderRadius:'4px',padding:'7px 10px',marginTop:4}}>{r.notes}</div>}
+          <div style={{fontSize:'11px',color:'#999',marginTop:8,textAlign:'right'}}>Not exported — remove from queue when done reviewing</div>
+        </div>
+      )}
+
+      {!isSkip&&<div className="rc-body">
         {/* USD conversion banner */}
         {isUSD&&<USDConversionBanner r={r} onUpdate={onUpdate}/>}
         {/* Header fields */}
@@ -978,7 +990,7 @@ function ReviewCard({item,result,onUpdate,onRemove}){
               <th className="r" style={{width:76}}>Amount</th>
               {!isCC&&<th style={{width:34}} title="Cost Centre">CC</th>}
               {!isCC&&<th style={{width:36}} title="Complete Goods Code">CGC</th>}
-              {!isCC&&<th style={{width:70}} title="Stock #">Stock #</th>}
+              {!isCC&&<th style={{width:70}} title="Stock # (equipment units only — rare on supplier invoices)">Stock #</th>}
               <th style={{width:38,textAlign:'center'}}>Conf</th>
               <th style={{width:22}}></th>
             </tr>
@@ -1046,8 +1058,9 @@ function ReviewCard({item,result,onUpdate,onRemove}){
       <div className="rc-footer">
         <span className="rc-footer-label">{isCC?'Balance Due':'Invoice Total'}</span>
         {mismatch&&<span className="rc-mismatch-warn">Blocked — GL lines don't balance</span>}
-        <span className="rc-total">${(total||0).toFixed(2)}</span>
+        <span className="rc-total" style={{color:isCreditMemo?'#C0392B':undefined}}>${(total||0).toFixed(2)}</span>
       </div>
+    </div>}
     </div>
   );
 }
@@ -1224,7 +1237,7 @@ function App(){
         <div className="app-logo">Hergott <span>Farm Equipment</span></div>
         <div className="header-divider"/>
         <div className="header-sub">AP Invoice Processor</div>
-        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.4.0 build 20260409.002</div>
+        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.4.0 build 20260409.004</div>
         <div className="header-spacer"/>
         {account?(
           <div className="header-user">
