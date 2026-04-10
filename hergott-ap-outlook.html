@@ -1,12 +1,13 @@
 <!DOCTYPE html>
-<!-- Hergott AP Invoice Processor — v0.4.0 build 20260409.001
+<!-- Hergott AP Invoice Processor — v0.4.0 build 20260409.002
      v0.1.0  2026-04-02  Initial working release
      v0.2.0  2026-04-09  Fix GL dropdown; PO Number field; CSV export
      v0.3.0  2026-04-09  Azure Function proxy; hardcoded credentials
      build 20260409.001  Anonymous proxy auth
      build 20260409.002  Export filename includes HHMM timestamp
      build 20260409.003  Prompt: Customer PO # rule; 14000 vendor rule explicit
-     v0.4.0  2026-04-09  Doc type detection (skip/credit/statement); USD conversion (BoC rate + fee); payment terms (BN30, 30th of month, due on receipt); departmental account warnings; MISC vendor flag; VRC/Golden West/Colony rules; CGC field per GL line
+     v0.4.0 build 20260409.001  Doc type detection; USD conversion; payment terms; dept account warnings; MISC vendor; CGC field
+     v0.4.0 build 20260409.002  Email list checkboxes: check all, check individual, Add Selected to Queue
 -->
 <html lang="en">
 <head>
@@ -1064,6 +1065,7 @@ function App(){
   const[folders,setFolders]=useState([]);
   const AP_FOLDER_ID='AAMkADAwY2RiOGIwLTNkNWEtNDNlNC04ZGZjLTQwMGY1MDg1Mjk4NAAuAAAAAAAHDVOfDT4oSIruQk434m3wAQAMceb0LHNsQIeZ8oOH-9q0AAStSKcvAAA=';const[folderId,setFolderId]=useState(AP_FOLDER_ID);
   const[emails,setEmails]=useState([]);
+  const[checkedEmails,setCheckedEmails]=useState(new Set());
   const[scanning,setScanning]=useState(false);
   const[queue,setQueue]=useState([]);
   const[results,setResults]=useState({});
@@ -1099,7 +1101,7 @@ function App(){
 
     async function handleScan(){
     if(!token){showToast('Sign in first','error');return;}
-    setScanning(true);setEmails([]);
+    setScanning(true);setEmails([]);setCheckedEmails(new Set());
     try{
       const tok=await getToken(account);setToken(tok);
       const msgs=await getUnreadEmails(tok,folderId);
@@ -1128,6 +1130,20 @@ function App(){
         setQueue(q=>[...q,{id,name:att.name,b64,source:msg.subject||msg.from?.emailAddress?.address||'Outlook',status:'pending'}]);
       }catch(e){showToast(`Could not load ${att.name}: ${e.message}`,'error',5000);}
     }
+  }
+
+  async function addCheckedToQueue(){
+    const toAdd=emails.filter(m=>checkedEmails.has(m.id));
+    if(!toAdd.length)return;
+    for(const msg of toAdd)await addEmailToQueue(msg);
+    setCheckedEmails(new Set());
+  }
+
+  function toggleCheck(id){
+    setCheckedEmails(prev=>{const s=new Set(prev);s.has(id)?s.delete(id):s.add(id);return s;});
+  }
+  function toggleCheckAll(){
+    setCheckedEmails(prev=>prev.size===emails.length?new Set():new Set(emails.map(m=>m.id)));
   }
 
   function addFiles(files){
@@ -1208,7 +1224,7 @@ function App(){
         <div className="app-logo">Hergott <span>Farm Equipment</span></div>
         <div className="header-divider"/>
         <div className="header-sub">AP Invoice Processor</div>
-        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.4.0 build 20260409.001</div>
+        <div style={{fontSize:'10px',color:'rgba(125,196,160,0.6)',fontFamily:"'DM Mono',monospace",marginLeft:'-6px'}}>v0.4.0 build 20260409.002</div>
         <div className="header-spacer"/>
         {account?(
           <div className="header-user">
@@ -1234,23 +1250,47 @@ function App(){
                 <div className="no-emails">Sign in to scan your Outlook inbox</div>
               ):(
                 <>
-                  <div className="folder-row"><span style={{flex:1,fontSize:'11px',color:'#888',alignSelf:'center',fontStyle:'italic'}}>AP mailbox</span><button className="btn-scan" onClick={handleScan} disabled={scanning}>{scanning?<><span className="spin"/>Scanning</>:'Scan Now'}</button></div>
+                  <div className="folder-row">
+                    <span style={{flex:1,fontSize:'11px',color:'#888',alignSelf:'center',fontStyle:'italic'}}>AP mailbox</span>
+                    <button className="btn-scan" onClick={handleScan} disabled={scanning}>{scanning?<><span className="spin"/>Scanning</>:'Scan Now'}</button>
+                  </div>
                   {emails.length===0&&!scanning&&(
                     <div className="no-emails">No unread emails with PDF attachments</div>
                   )}
                   {emails.length>0&&(
-                    <div className="email-list">
-                      {emails.map(msg=>(
-                        <div key={msg.id} className="email-item">
-                          <div className="email-info">
-                            <div className="email-subject">{msg.subject||'(no subject)'}</div>
-                            <div className="email-meta">{msg.from?.emailAddress?.name||msg.from?.emailAddress?.address} · {new Date(msg.receivedDateTime).toLocaleDateString('en-CA')}</div>
+                    <>
+                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'5px 10px',borderBottom:'1px solid #E6E3DE',background:'#F5F3EF'}}>
+                        <label style={{display:'flex',alignItems:'center',gap:6,fontSize:'11px',color:'#555',cursor:'pointer',fontWeight:600}}>
+                          <input type="checkbox" style={{cursor:'pointer'}}
+                            checked={checkedEmails.size===emails.length&&emails.length>0}
+                            onChange={toggleCheckAll}/>
+                          {checkedEmails.size===emails.length&&emails.length>0?'Uncheck All':'Check All'}
+                          {checkedEmails.size>0&&<span style={{color:'#1B3D2B'}}>({checkedEmails.size} selected)</span>}
+                        </label>
+                        {checkedEmails.size>0&&(
+                          <button className="btn-scan" style={{padding:'3px 10px',fontSize:'11px'}}
+                            onClick={addCheckedToQueue}>
+                            Add {checkedEmails.size} to Queue
+                          </button>
+                        )}
+                      </div>
+                      <div className="email-list">
+                        {emails.map(msg=>(
+                          <div key={msg.id} className="email-item" onClick={()=>toggleCheck(msg.id)}
+                            style={{background:checkedEmails.has(msg.id)?'#EDF7F1':''}}>
+                            <input type="checkbox" style={{cursor:'pointer',flexShrink:0}}
+                              checked={checkedEmails.has(msg.id)}
+                              onChange={()=>toggleCheck(msg.id)}
+                              onClick={e=>e.stopPropagation()}/>
+                            <div className="email-info" style={{flex:1}}>
+                              <div className="email-subject">{msg.subject||'(no subject)'}</div>
+                              <div className="email-meta">{msg.from?.emailAddress?.name||msg.from?.emailAddress?.address} · {new Date(msg.receivedDateTime).toLocaleDateString('en-CA')}</div>
+                            </div>
+                            <span className="email-badge">{msg.pdfs.length} PDF{msg.pdfs.length!==1?'s':''}</span>
                           </div>
-                          <span className="email-badge">{msg.pdfs.length} PDF{msg.pdfs.length!==1?'s':''}</span>
-                          <button className="btn-email-add" onClick={()=>addEmailToQueue(msg)}>Add</button>
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    </>
                   )}
                 </>
               )}
